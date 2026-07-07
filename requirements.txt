@@ -1,0 +1,21 @@
+# =============================================================================
+# Medieval Village Simulation - Runtime dependencies
+# =============================================================================
+# Pin to compatible release ranges so the architecture stays reproducible while
+# still receiving patch/minor updates. Tighten to exact versions before a
+# production release (e.g. via `pip freeze > requirements.lock`).
+# -----------------------------------------------------------------------------
+
+# --- Multi-agent simulation framework (mandatory) ---------------------------
+mesa>=3.1,<4.0
+
+# --- Rendering (future Pygame frontend) -------------------------------------
+pygame>=2.6,<3.0
+
+# --- Numerical / spatial helpers --------------------------------------------
+numpy>=2.0,<3.0
+
+# --- Configuration & validation ---------------------------------------------
+pydantic>=2.7,<3.0
+pydantic-settings>=2.3,<3.0
+python-dotenv>=1.0,<2.0
