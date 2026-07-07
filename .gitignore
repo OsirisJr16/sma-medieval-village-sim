@@ -40,6 +40,10 @@ coverage.xml
 *~
 .DS_Store
 
+# --- Claude Code (keep shared settings.json; ignore local/temp files) --------
+.claude/settings.local.json
+.claude/*.tmp.*
+
 # --- Environment & secrets ---------------------------------------------------
 .env
 .env.local
