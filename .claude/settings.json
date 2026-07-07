@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(git --version)",
+      "Bash(git config *)",
+      "Bash(git switch *)",
+      "Bash(cd /home/mintsa/sma_medieval_sim *)"
+    ],
+    "additionalDirectories": [
+      "/home/mintsa/sma_medieval_sim/.claude"
     ]
   }
 }

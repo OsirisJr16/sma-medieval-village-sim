@@ -16,7 +16,7 @@ description = "A modular, agent-based Medieval Village Simulation built on Mesa.
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "The Next Mind", email = "dev@thenextmind.ai" }]
+authors = [{ name = "OsirisJr16" }]
 keywords = ["mesa", "multi-agent-system", "simulation", "pygame", "medieval"]
 classifiers = [
     "Development Status :: 1 - Planning",
