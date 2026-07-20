@@ -50,20 +50,29 @@ class Settings(BaseSettings):
     log_dir: str = "logs"
 
     # --- World / grid --------------------------------------------------------
-    grid_width: int = Field(default=100, ge=1)
-    grid_height: int = Field(default=100, ge=1)
+    grid_width: int = Field(default=80, ge=1)
+    grid_height: int = Field(default=80, ge=1)
     grid_torus: bool = False
+    scenery_density: float = Field(
+        default=0.35, ge=0.0, le=1.0, description="Fraction of cells carrying scenery."
+    )
 
     # --- Simulation ----------------------------------------------------------
-    max_steps: int = Field(default=0, ge=0, description="0 = run until stopped.")
-    initial_villagers: int = Field(default=20, ge=0)
+    max_steps: int = Field(default=20, ge=0, description="0 = run until stopped.")
+    initial_villagers: int = Field(default=40, ge=0)
 
     # --- Rendering (Pygame) --------------------------------------------------
     render_enabled: bool = True
     window_width: int = Field(default=1280, ge=1)
     window_height: int = Field(default=720, ge=1)
     target_fps: int = Field(default=60, ge=1)
-    tile_size: int = Field(default=16, ge=1)
+    # Largest a grid cell may be drawn; the world otherwise scales to fill the
+    # (resizable) window.
+    tile_size: int = Field(default=64, ge=1)
+    show_grid: bool = False
+    # Model steps per second when rendering; decoupled from target_fps so the
+    # window stays smooth/responsive while movement remains watchable.
+    simulation_fps: int = Field(default=6, ge=1)
 
     # --- Persistence ---------------------------------------------------------
     save_dir: str = "saves"

@@ -57,19 +57,12 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = parse_args(argv)
 
-    # TODO: Wire the composition root and launch the engine, e.g.:
-    #   from core.bootstrap import bootstrap
-    #   application = bootstrap(headless=args.headless)
-    #   application.engine.run()
-    #
-    # For now the skeleton only proves the packages import cleanly.
-    from core.bootstrap import bootstrap  # noqa: PLC0415 (deferred by design)
-    from core.logger import get_logger
+    # Imports deferred so importing this module for tooling stays side-effect free.
+    from config.settings import get_settings  # noqa: PLC0415
+    from core.bootstrap import bootstrap  # noqa: PLC0415
 
-    logger = get_logger(__name__)
-    bootstrap(headless=args.headless)
-    logger.info("Medieval Village Simulation skeleton initialized successfully.")
-    logger.info("No simulation implemented yet — see the roadmap in README.md.")
+    application = bootstrap(headless=args.headless)
+    application.engine.run(get_settings().max_steps)
 
     return 0
 
