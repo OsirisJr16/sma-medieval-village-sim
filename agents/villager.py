@@ -12,11 +12,14 @@ from typing import TYPE_CHECKING
 
 from agents.base_agent import BaseAgent
 from config.constants import AgentType
+from core.logger import get_logger
 
 if TYPE_CHECKING:
     import mesa
 
     from buildings.building import BaseBuilding
+
+_logger = get_logger(__name__)
 
 
 class Villager(BaseAgent):
@@ -44,7 +47,25 @@ class Villager(BaseAgent):
         self.workplace: BaseBuilding | None = None
 
     def step(self) -> None:
-        """Advance the villager by one tick."""
-        # TODO: perceive -> decay needs -> let the brain choose a behavior ->
-        #       act -> process mailbox.
-        raise NotImplementedError("Villager.step is not implemented yet.")
+        """Advance the villager by one tick: move to a random adjacent cell."""
+        if self.position is None:
+            return
+
+        origin = self.position
+        options = [
+            cell
+            for cell in self.model.map.neighbors(origin)
+            if self.model.is_walkable(*cell)
+        ]
+        if not options:
+            return
+
+        destination = self.random.choice(options)
+        self.model.map.move_agent(self, destination)
+
+        _logger.info(
+            "Villager %d moved from (%d,%d) to (%d,%d)",
+            self.unique_id,
+            *origin,
+            *destination,
+        )

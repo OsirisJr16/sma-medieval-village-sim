@@ -1,43 +1,36 @@
 """Central Mesa model for the Medieval Village Simulation.
 
 :class:`GameModel` is the heart of the simulation. It subclasses
-:class:`mesa.Model` and owns the global simulation state: the spatial grid, the
-agent population, the world environment, and data collection.
+:class:`mesa.Model` and owns the global simulation state: the spatial map and
+the agent population.
 
 Following Mesa 3.x conventions, agents auto-register with ``self.agents`` (an
 ``AgentSet``) on construction, and activation is expressed via AgentSet methods
-(e.g. ``self.agents.shuffle_do("step")``) rather than the legacy ``mesa.time``
+(``self.agents.shuffle_do("step")``) rather than the legacy ``mesa.time``
 schedulers.
-
-This module contains **no** simulation logic yet — only the structural
-placeholders and TODO markers for future development.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import mesa
 
-if TYPE_CHECKING:  # Imported only for type hints to avoid import cycles.
-    from world.world import World
+from agents.villager import Villager
+from core.logger import get_logger
+from world.map import Map
+from world.scenery import Scenery
+from world.terrain import Terrain
+
+_logger = get_logger(__name__)
 
 
 class GameModel(mesa.Model):
     """The Mesa model that drives the whole simulation.
 
-    Responsibilities (to be implemented):
-        * Create and hold the spatial grid (``mesa.space.MultiGrid``).
-        * Populate the world with agents and buildings.
-        * Advance the simulation one tick per :meth:`step`.
-        * Collect statistics via a ``mesa.DataCollector``.
-
     Attributes:
         width: Grid width in cells.
         height: Grid height in cells.
-        grid: The Mesa spatial grid (assigned during setup).
-        world: The :class:`~world.world.World` environment aggregate.
-        running: Mesa flag consulted by batch runners / visualizers.
+        map: The spatial map wrapping the Mesa grid.
+        running: Mesa flag consulted by the engine / batch runners.
     """
 
     def __init__(
@@ -45,49 +38,65 @@ class GameModel(mesa.Model):
         width: int,
         height: int,
         *,
+        num_villagers: int,
+        torus: bool = False,
+        scenery_density: float = 0.35,
         seed: int | None = None,
     ) -> None:
-        """Initialize the model.
+        """Initialize and populate the model.
 
         Args:
             width: Grid width in cells.
             height: Grid height in cells.
+            num_villagers: Number of villagers to spawn.
+            torus: Whether the grid wraps around its edges.
+            scenery_density: Fraction of cells carrying scenery.
             seed: Optional RNG seed for reproducible runs.
         """
-        super().__init__(seed=seed)
+        # Mesa 3.5 seeds ``self.random`` deterministically from an integer
+        # ``rng`` and deprecates the ``seed`` keyword.
+        super().__init__(rng=seed)
 
         self.width: int = width
         self.height: int = height
+        self.map: Map = Map(width, height, torus=torus)
+        self.terrain: Terrain = Terrain(width, height)
+        self.scenery: Scenery = Scenery.generate(
+            width, height, self.random, density=scenery_density
+        )
 
-        # TODO: Instantiate the spatial grid, e.g.:
-        #   self.grid = mesa.space.MultiGrid(width, height, torus=False)
-        self.grid: mesa.space.MultiGrid | None = None
-
-        # TODO: Build the world environment (terrain, weather, seasons, ...).
-        self.world: World | None = None
-
-        # TODO: Spawn initial agents and buildings.
-        # TODO: Configure a mesa.DataCollector for metrics.
+        self._spawn_villagers(num_villagers)
 
         # Mesa consults this flag to know whether to keep stepping.
         self.running: bool = True
 
+        _logger.info("Simulation initialized.")
+        _logger.info("Grid: %d x %d", width, height)
+        _logger.info("Villagers: %d", len(self.agents))
+
+    def is_walkable(self, x: int, y: int) -> bool:
+        """Return whether an agent may occupy a cell.
+
+        Args:
+            x: Cell x-coordinate.
+            y: Cell y-coordinate.
+
+        Returns:
+            True when neither the terrain nor its scenery blocks movement.
+        """
+        return self.terrain.is_passable(x, y) and not self.scenery.blocks(x, y)
+
+    def _spawn_villagers(self, count: int) -> None:
+        open_cells = [
+            (x, y)
+            for y in range(self.height)
+            for x in range(self.width)
+            if self.is_walkable(x, y)
+        ]
+        for _ in range(count):
+            villager = Villager(self)
+            self.map.place_agent(villager, self.random.choice(open_cells))
+
     def step(self) -> None:
-        """Advance the simulation by a single tick.
-
-        Called once per scheduler activation. Implementations should update the
-        world, then activate agents (e.g. ``self.agents.shuffle_do("step")``),
-        then collect data.
-        """
-        # TODO: Advance world time (season/weather), activate agents, collect
-        #       data, and evaluate stopping conditions.
-        raise NotImplementedError("GameModel.step is not implemented yet.")
-
-    def setup(self) -> None:
-        """Populate the model with its initial state.
-
-        Kept separate from ``__init__`` so the model can be reset/reseeded
-        without reconstruction.
-        """
-        # TODO: Create grid, world, agents, buildings, and data collectors.
-        raise NotImplementedError("GameModel.setup is not implemented yet.")
+        """Advance the simulation by a single tick by activating every agent."""
+        self.agents.shuffle_do("step")

@@ -11,6 +11,7 @@ container; it does not start the simulation.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from core.logger import configure_logging, get_logger
 if TYPE_CHECKING:
     from core.engine import Engine
     from core.model import GameModel
+    from rendering.renderer import Renderer
 
 
 @dataclass(slots=True)
@@ -54,25 +56,39 @@ def bootstrap(*, headless: bool = False) -> Application:
         to_file=settings.log_to_file,
         log_dir=settings.log_dir,
     )
+    # Mesa emits verbose INFO-level step logs on its own logger; keep our output
+    # limited to the simulation's own progress messages.
+    logging.getLogger("MESA").setLevel(logging.WARNING)
+
     logger = get_logger(__name__)
     logger.debug("Bootstrapping application (headless=%s)...", headless)
 
-    # Construct the top-level object graph. Note this only *wires* objects; it
-    # does not call model.setup() (world/agent population) which is a later
-    # roadmap phase. Constructing objects is real composition — not simulation
-    # logic — so the skeleton is runnable end-to-end.
     model = GameModel(
         settings.grid_width,
         settings.grid_height,
+        num_villagers=settings.initial_villagers,
+        torus=settings.grid_torus,
+        scenery_density=settings.scenery_density,
         seed=settings.random_seed,
     )
 
-    # TODO: Build a real Renderer when the rendering layer exists, e.g.:
-    #   renderer = None if headless or not settings.render_enabled \
-    #              else Renderer(width=settings.window_width, ...)
-    renderer = None
+    renderer: Renderer | None = None
+    if not headless and settings.render_enabled:
+        from rendering.renderer import Renderer
 
-    engine = Engine(model, renderer=renderer, target_fps=settings.target_fps)
+        renderer = Renderer(
+            settings.window_width,
+            settings.window_height,
+            max_tile_size=settings.tile_size,
+            show_grid=settings.show_grid,
+        )
+
+    engine = Engine(
+        model,
+        renderer=renderer,
+        target_fps=settings.target_fps,
+        simulation_fps=settings.simulation_fps,
+    )
 
     logger.debug("Application object graph wired.")
     return Application(model=model, engine=engine)
