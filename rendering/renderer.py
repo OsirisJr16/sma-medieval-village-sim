@@ -238,6 +238,7 @@ class Renderer:
             self._draw_grid(model)
         self._draw_agents(model)
         self._draw_night(model)
+        self._draw_path(model)
         self._draw_selection(model)
         if self.ui is not None:
             self.ui.draw(
@@ -251,6 +252,19 @@ class Renderer:
         else:
             self._draw_clock(model)
         pygame.display.flip()
+
+    def _draw_path(self, model: GameModel) -> None:
+        """Trace the selected agent's cached A* route, if it has one."""
+        path = getattr(self.selected, "_nav_path", None)
+        if not path:
+            return
+        import pygame
+
+        cell = self.cell_size
+        for cx, cy in path:
+            ox, oy = self.camera.world_to_screen((cx * cell, cy * cell))
+            centre = (int(ox + cell / 2), int(oy + cell / 2))
+            pygame.draw.circle(self._surface, UI_ACCENT, centre, max(2, cell // 8))
 
     def _draw_selection(self, model: GameModel) -> None:
         """Ring the selected agent so it stands out (drawn above the night tint)."""

@@ -28,17 +28,11 @@ from ai.behaviors.sleep import SleepBehavior
 from ai.behaviors.trade import TradeBehavior
 from ai.behaviors.work import WorkBehavior
 from ai.fsm.state import State
+from ai.fuzzy import choose_daily_action
 from config.constants import AgentType
 
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
-
-#: Need levels at which an agent stops working.
-_TIRED: Final[float] = 0.25
-_HUNGRY: Final[float] = 0.70
-#: Need levels at which an agent resumes working.
-_RESTED: Final[float] = 0.90
-_FED: Final[float] = 0.15
 
 
 def _is_night(agent: BaseAgent) -> bool:
@@ -52,15 +46,18 @@ def _alarm(agent: BaseAgent) -> tuple[int, int] | None:
     return getter() if getter is not None else None
 
 
-def _daily_next(agent: BaseAgent) -> str | None:
-    """Transition shared by working roles: flee danger, else eat / sleep."""
+def _daily_next(agent: BaseAgent, current: str) -> str | None:
+    """Choose the next daily state via fuzzy desire arbitration.
+
+    Danger always wins; otherwise the strongest fuzzy desire among eat / sleep /
+    work decides. An empty granary vetoes eating (there is nothing to eat).
+    """
     if _alarm(agent) is not None:
         return agent.THREAT_STATE
-    if agent.needs.get(Need.HUNGER, 0.0) >= _HUNGRY:
-        return EatingState.name
-    if _is_night(agent) or agent.needs.get(Need.ENERGY, 1.0) <= _TIRED:
-        return SleepingState.name
-    return None
+    choice = choose_daily_action(agent, current)
+    if choice == EatingState.name and agent.model.granary <= 0.0:
+        return agent.WORK_STATE
+    return choice
 
 #: Hunger levels bounding a prey animal's graze/wander cycle.
 _PREY_HUNGRY: Final[float] = 0.55
@@ -96,7 +93,7 @@ class WorkingState(State):
         Returns:
             The next state's name, or ``None`` to keep working.
         """
-        return _daily_next(agent)
+        return _daily_next(agent, self.name)
 
 
 class SleepingState(State):
@@ -125,11 +122,7 @@ class SleepingState(State):
         Returns:
             The next state's name, or ``None`` to keep sleeping.
         """
-        if _alarm(agent) is not None:
-            return agent.THREAT_STATE
-        if not _is_night(agent) and agent.needs.get(Need.ENERGY, 1.0) >= _RESTED:
-            return agent.WORK_STATE
-        return None
+        return _daily_next(agent, self.name)
 
 
 class EatingState(State):
@@ -158,16 +151,7 @@ class EatingState(State):
         Returns:
             The next state's name, or ``None`` to keep eating.
         """
-        if _alarm(agent) is not None:
-            return agent.THREAT_STATE
-        if agent.needs.get(Need.HUNGER, 0.0) <= _FED:
-            return SleepingState.name if _is_night(agent) else agent.WORK_STATE
-        # Nothing left to eat: resume work (a farmer will restock the granary).
-        if agent.model.granary <= 0.0:
-            return SleepingState.name if _is_night(agent) else agent.WORK_STATE
-        if agent.needs.get(Need.ENERGY, 1.0) <= _TIRED:
-            return SleepingState.name
-        return None
+        return _daily_next(agent, self.name)
 
 
 class AlarmedState(State):
@@ -264,7 +248,7 @@ class FarmingState(State):
         Returns:
             The next state's name, or ``None`` to keep farming.
         """
-        return _daily_next(agent)
+        return _daily_next(agent, self.name)
 
 
 class TradingState(State):
@@ -293,7 +277,7 @@ class TradingState(State):
         Returns:
             The next state's name, or ``None`` to keep trading.
         """
-        return _daily_next(agent)
+        return _daily_next(agent, self.name)
 
 
 class WanderingState(State):

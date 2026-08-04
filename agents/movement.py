@@ -62,6 +62,49 @@ def step_away(agent: BaseAgent, threat: Coord) -> Coord | None:
     return _greedy_step(agent, threat, toward=False)
 
 
+def navigate(agent: BaseAgent, goal: Coord) -> Coord | None:
+    """Take one step toward ``goal`` along an A* path around obstacles.
+
+    The path is cached on the agent and only recomputed when the goal changes or
+    the cached route becomes stale — so this stays cheap for a fixed destination.
+    Falls back to a greedy step when no path exists.
+
+    Args:
+        agent: The agent to move.
+        goal: The destination cell.
+
+    Returns:
+        The destination cell stepped to, or ``None`` if the agent could not move.
+    """
+    origin = agent.position
+    if origin is None or origin == goal:
+        return None
+
+    path = getattr(agent, "_nav_path", None)
+    if getattr(agent, "_nav_goal", None) != goal or not _next_is_reachable(agent, origin, path):
+        path = agent.model.pathfinder.find_path(origin, goal)
+        agent._nav_goal = goal
+        agent._nav_path = path
+
+    if not path:  # Unreachable via A*: nudge greedily instead of freezing.
+        return step_toward(agent, goal)
+
+    destination = path[0]
+    agent.model.map.move_agent(agent, destination)
+    agent._nav_path = path[1:]
+    return destination
+
+
+def _next_is_reachable(agent: BaseAgent, origin: Coord, path: list[Coord] | None) -> bool:
+    if not path:
+        return False
+    nxt = path[0]
+    return (
+        max(abs(origin[0] - nxt[0]), abs(origin[1] - nxt[1])) == 1
+        and agent.model.is_walkable(*nxt)
+    )
+
+
 def _greedy_step(agent: BaseAgent, reference: Coord, *, toward: bool) -> Coord | None:
     origin = agent.position
     if origin is None:
