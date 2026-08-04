@@ -44,6 +44,20 @@ class State(ABC):
         """
         raise NotImplementedError
 
+    def next_state(self, agent: BaseAgent) -> str | None:
+        """Return the state to switch into, or ``None`` to stay.
+
+        Each state owns its own exit conditions, which keeps transition rules
+        beside the behavior they guard instead of in a central table.
+
+        Args:
+            agent: The agent currently in this state.
+
+        Returns:
+            The name of the next state, or ``None`` to remain here.
+        """
+        return None
+
     def on_exit(self, agent: BaseAgent) -> None:
         """Hook run once when the agent transitions *out of* this state.
 

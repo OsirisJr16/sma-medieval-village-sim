@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from config.constants import DAYS_PER_SEASON
+
 
 class SeasonType(StrEnum):
     """The four seasons, in cyclic order."""
@@ -19,6 +21,11 @@ class SeasonType(StrEnum):
     SUMMER = "summer"
     AUTUMN = "autumn"
     WINTER = "winter"
+
+    def next(self) -> SeasonType:
+        """Return the season that follows this one, wrapping after winter."""
+        order = list(SeasonType)
+        return order[(order.index(self) + 1) % len(order)]
 
 
 class Season:
@@ -38,10 +45,9 @@ class Season:
         self.current: SeasonType = initial
         self.day_of_season: int = 0
 
-    def step(self) -> None:
-        """Advance the seasonal clock by one tick.
-
-        Should roll over to the next season after ``DAYS_PER_SEASON`` days.
-        """
-        # TODO: Advance day_of_season and cycle `current` on rollover.
-        raise NotImplementedError("Season.step is not implemented yet.")
+    def advance_day(self) -> None:
+        """Advance the calendar by one day, cycling season on rollover."""
+        self.day_of_season += 1
+        if self.day_of_season >= DAYS_PER_SEASON:
+            self.day_of_season = 0
+            self.current = self.current.next()

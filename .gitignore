@@ -58,3 +58,6 @@ mde/generated/*
 
 # --- Jupyter (optional analysis notebooks) -----------------------------------
 .ipynb_checkpoints/
+
+# macOS archive junk
+__MACOSX/

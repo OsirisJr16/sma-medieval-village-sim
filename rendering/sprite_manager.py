@@ -39,6 +39,17 @@ _TILESET = Path("assets/fileds_tileset")
 _OBJECTS = _TILESET / "2 Objects"
 _GROUND_TILE = _TILESET / "1 Tiles" / "FieldsTile_38.png"
 
+# Prey animals whose first animation frame is a clean front-facing pose.
+_PREY_DIR = Path("assets/prey/PNG/Without_shadow")
+_PREY_ANIMALS: tuple[str, ...] = (
+    "Chick",
+    "Lamb",
+    "Piglet",
+    "Rooster",
+    "Sheep",
+    "Turkey",
+)
+
 # Art sources per scenery type. Entries ending in ``*`` expand to every match,
 # so each type draws from the full variety the tileset offers.
 _SCENERY_ART: dict[SceneryType, tuple[Path, ...]] = {
@@ -79,8 +90,10 @@ class SpriteManager:
         self.villager_dir: Path = Path(villager_dir)
         self.markers: dict[_MarkerKey, Surface] = {}
         self._villagers: dict[int, list[Surface]] = {}
+        self._prey: dict[int, list[Surface]] = {}
         self._ground: dict[int, Surface] = {}
         self._scenery: dict[int, dict[SceneryType, list[Surface]]] = {}
+        self._badges: dict[tuple[str, int, RGB], Surface] = {}
 
     def villager_sprites(self, cell: int) -> list[Surface]:
         """Return villager sprites sized for a cell, loading them once.
@@ -98,6 +111,27 @@ class SpriteManager:
                 for path in sorted(self.villager_dir.glob("*.png"))
             ]
             self._villagers[cell] = sprites
+        return sprites
+
+    def prey_sprites(self, cell: int) -> list[Surface]:
+        """Return prey animal sprites sized for a cell, loading them once.
+
+        Args:
+            cell: Cell size in pixels.
+
+        Returns:
+            One trimmed, proportionally scaled sprite per animal.
+        """
+        sprites = self._prey.get(cell)
+        if sprites is None:
+            loaded = (
+                self._load_creature(
+                    _PREY_DIR / f"{name}_animation_without_shadow.png", cell
+                )
+                for name in _PREY_ANIMALS
+            )
+            sprites = [sprite for sprite in loaded if sprite is not None]
+            self._prey[cell] = sprites
         return sprites
 
     def ground_tile(self, cell: int) -> Surface | None:
@@ -124,6 +158,27 @@ class SpriteManager:
             self._scenery[cell] = variants
         return variants
 
+    def badge(self, label: str, cell: int, color: RGB) -> Surface:
+        """Return a cached text badge used to annotate an agent.
+
+        Args:
+            label: Short text to draw (typically a single letter).
+            cell: Cell size in pixels, which sets the font size.
+            color: Text color.
+
+        Returns:
+            A per-pixel-alpha surface holding the rendered label.
+        """
+        key = (label, cell, color)
+        surface = self._badges.get(key)
+        if surface is None:
+            import pygame
+
+            font = pygame.font.Font(None, max(12, cell // 2))
+            surface = font.render(label, True, color)
+            self._badges[key] = surface
+        return surface
+
     def circle(self, diameter: int, color: RGB) -> Surface:
         """Return a cached circular marker surface, creating it on first use.
 
@@ -149,8 +204,10 @@ class SpriteManager:
         """Drop all cached surfaces."""
         self.markers.clear()
         self._villagers.clear()
+        self._prey.clear()
         self._ground.clear()
         self._scenery.clear()
+        self._badges.clear()
 
     @classmethod
     def _load_variants(cls, sources: tuple[Path, ...], cell: int) -> list[Surface]:
@@ -172,6 +229,27 @@ class SpriteManager:
         trimmed = frame.subsurface(frame.get_bounding_rect()).copy()
         scale = (cell * _VILLAGER_SCALE) / trimmed.get_height()
         size = (max(1, round(trimmed.get_width() * scale)), max(1, round(cell * _VILLAGER_SCALE)))
+        return pygame.transform.scale(trimmed, size)
+
+    @staticmethod
+    def _load_creature(path: Path, cell: int) -> Surface | None:
+        """Load an animal's first frame, trimmed and scaled by ``cell / 32``.
+
+        Proportional scaling keeps each animal's relative size (a chick stays
+        smaller than a sheep).
+        """
+        if not path.exists():
+            return None
+        import pygame
+
+        sheet = pygame.image.load(str(path)).convert_alpha()
+        frame = sheet.subsurface((0, 0, _FRAME_SIZE, _FRAME_SIZE)).copy()
+        trimmed = frame.subsurface(frame.get_bounding_rect()).copy()
+        scale = cell / _NATIVE_TILE
+        size = (
+            max(1, round(trimmed.get_width() * scale)),
+            max(1, round(trimmed.get_height() * scale)),
+        )
         return pygame.transform.scale(trimmed, size)
 
     @staticmethod

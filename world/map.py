@@ -76,6 +76,47 @@ class Map:
         self.grid.move_agent(agent, coord)
         agent.position = coord
 
+    def agents_at(self, coord: Coord) -> list[BaseAgent]:
+        """Return the agents currently occupying a cell.
+
+        Args:
+            coord: The ``(x, y)`` cell to inspect.
+
+        Returns:
+            The agents in that cell (possibly empty).
+        """
+        if not self.in_bounds(coord):
+            return []
+        return list(self.grid.get_cell_list_contents([coord]))
+
+    def is_empty(self, coord: Coord) -> bool:
+        """Return whether a cell currently holds no agents.
+
+        Args:
+            coord: The ``(x, y)`` cell to test.
+
+        Returns:
+            True if no agent occupies the cell.
+        """
+        return self.grid.is_cell_empty(coord)
+
+    def agents_near(
+        self, coord: Coord, radius: int, *, moore: bool = True
+    ) -> list[BaseAgent]:
+        """Return agents within ``radius`` cells of a coordinate.
+
+        Args:
+            coord: The center coordinate (excluded).
+            radius: Search radius in cells.
+            moore: Use Moore (8) neighborhood if True, else Von Neumann (4).
+
+        Returns:
+            The agents occupying the surrounding cells.
+        """
+        return self.grid.get_neighbors(
+            coord, moore=moore, include_center=False, radius=radius
+        )
+
     def neighbors(self, coord: Coord, *, moore: bool = True) -> list[Coord]:
         """Return the neighboring coordinates of a cell.
 

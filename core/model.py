@@ -12,13 +12,23 @@ schedulers.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import mesa
 
+from agents.deer import Deer
+from agents.guard import Guard
 from agents.villager import Villager
+from agents.wolf import Wolf
 from core.logger import get_logger
+from communication.event_bus import EventBus
+from world.clock import WorldClock
 from world.map import Map
 from world.scenery import Scenery
 from world.terrain import Terrain
+
+if TYPE_CHECKING:
+    from agents.base_agent import BaseAgent
 
 _logger = get_logger(__name__)
 
@@ -39,6 +49,9 @@ class GameModel(mesa.Model):
         height: int,
         *,
         num_villagers: int,
+        num_guards: int = 0,
+        num_prey: int = 0,
+        num_predators: int = 0,
         torus: bool = False,
         scenery_density: float = 0.35,
         seed: int | None = None,
@@ -49,6 +62,9 @@ class GameModel(mesa.Model):
             width: Grid width in cells.
             height: Grid height in cells.
             num_villagers: Number of villagers to spawn.
+            num_guards: Number of guards to spawn.
+            num_prey: Number of prey animals to spawn.
+            num_predators: Number of predators (wolves) to spawn.
             torus: Whether the grid wraps around its edges.
             scenery_density: Fraction of cells carrying scenery.
             seed: Optional RNG seed for reproducible runs.
@@ -59,20 +75,26 @@ class GameModel(mesa.Model):
 
         self.width: int = width
         self.height: int = height
+        self.clock: WorldClock = WorldClock()
+        self.events: EventBus = EventBus()
         self.map: Map = Map(width, height, torus=torus)
         self.terrain: Terrain = Terrain(width, height)
         self.scenery: Scenery = Scenery.generate(
             width, height, self.random, density=scenery_density
         )
 
-        self._spawn_villagers(num_villagers)
+        self._spawn(Villager, num_villagers)
+        self._spawn(Guard, num_guards)
+        self._spawn(Deer, num_prey)
+        self._spawn(Wolf, num_predators)
 
         # Mesa consults this flag to know whether to keep stepping.
         self.running: bool = True
 
         _logger.info("Simulation initialized.")
         _logger.info("Grid: %d x %d", width, height)
-        _logger.info("Villagers: %d", len(self.agents))
+        _logger.info("Villagers: %d  Guards: %d", num_villagers, num_guards)
+        _logger.info("Prey: %d  Predators: %d", num_prey, num_predators)
 
     def is_walkable(self, x: int, y: int) -> bool:
         """Return whether an agent may occupy a cell.
@@ -86,7 +108,9 @@ class GameModel(mesa.Model):
         """
         return self.terrain.is_passable(x, y) and not self.scenery.blocks(x, y)
 
-    def _spawn_villagers(self, count: int) -> None:
+    def _spawn(self, agent_class: type[BaseAgent], count: int) -> None:
+        if count <= 0:
+            return
         open_cells = [
             (x, y)
             for y in range(self.height)
@@ -94,9 +118,12 @@ class GameModel(mesa.Model):
             if self.is_walkable(x, y)
         ]
         for _ in range(count):
-            villager = Villager(self)
-            self.map.place_agent(villager, self.random.choice(open_cells))
+            agent = agent_class(self)
+            self.map.place_agent(agent, self.random.choice(open_cells))
 
     def step(self) -> None:
-        """Advance the simulation by a single tick by activating every agent."""
+        """Advance time by one hour, then activate every agent."""
+        self.clock.advance()
+        if self.clock.hour == 0:
+            _logger.info("Day %d dawns (%s).", self.clock.day + 1, self.clock.season.current.value)
         self.agents.shuffle_do("step")

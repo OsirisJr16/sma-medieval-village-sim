@@ -1,25 +1,44 @@
 """Villager agent — base for the human population.
 
-:class:`Villager` is the concrete base class for all human townsfolk. It fills in
-the human-specific scaffolding on top of :class:`~agents.base_agent.BaseAgent`
-(home, workplace, profession) and provides a concrete — but not yet implemented
-— :meth:`step`. Role-specific villagers (farmer, guard, ...) subclass it.
+:class:`Villager` is the concrete base class for all human townsfolk. It owns
+the human-specific state (needs, home, workplace) and delegates its per-tick
+decisions to a finite state machine. Role-specific villagers (farmer, guard,
+...) subclass it.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from agents.base_agent import BaseAgent
+from agents.needs import Need, clamp
+from agents.perception import nearest_of_type
+from agents.reproduction import try_reproduce
+from ai.fsm.state_machine import StateMachine
+from ai.fsm.states import AlarmedState, EatingState, SleepingState, WorkingState
 from config.constants import AgentType
-from core.logger import get_logger
+from communication.events import Event, EventType
 
 if TYPE_CHECKING:
     import mesa
 
+    from agents.base_agent import Coord
     from buildings.building import BaseBuilding
 
-_logger = get_logger(__name__)
+#: Baseline metabolism applied every tick, regardless of what the villager does.
+_HUNGER_PER_TICK: Final[float] = 0.010
+_ENERGY_PER_TICK: Final[float] = 0.006
+#: Breeding: content, rested villagers occasionally start a family, up to a cap.
+_BREED_HUNGER: Final[float] = 0.30
+_BREED_ENERGY: Final[float] = 0.60
+_BREED_CHANCE: Final[float] = 0.01
+_POPULATION_CAP: Final[int] = 150
+#: How far a villager can personally spot a wolf (short; they rely on alerts).
+_VISION: Final[int] = 3
+#: A villager reacts to a warned threat within this many cells...
+_ALARM_RADIUS: Final[int] = 9
+#: ...and stays wary of it for this many ticks after the last sighting.
+_ALARM_MEMORY: Final[int] = 5
 
 
 class Villager(BaseAgent):
@@ -34,6 +53,9 @@ class Villager(BaseAgent):
     #: Role identifier; overridden by specialized subclasses.
     agent_type: AgentType = AgentType.VILLAGER
 
+    #: FSM state to enter on a threat alert; guards override this to fight.
+    THREAT_STATE: str = AlarmedState.name
+
     def __init__(self, model: mesa.Model) -> None:
         """Initialize the villager.
 
@@ -41,31 +63,88 @@ class Villager(BaseAgent):
             model: The model the villager belongs to.
         """
         super().__init__(model)
+        self.vision = _VISION
 
-        # TODO: Seed human-specific needs (hunger, energy, social, safety).
+        # Staggered starting needs so the population does not eat and sleep in
+        # lockstep.
+        self.needs = {
+            Need.HUNGER: self.random.uniform(0.0, 0.4),
+            Need.ENERGY: self.random.uniform(0.6, 1.0),
+        }
+
         self.home: BaseBuilding | None = None
         self.workplace: BaseBuilding | None = None
+        # Last danger this villager knows of: (position, tick). Populated by the
+        # threat handler — either from its own sighting or a neighbor's alert.
+        self._alarm: tuple[Coord, int] | None = None
+        self.brain = self._build_brain()
+
+        self.model.events.subscribe(EventType.THREAT_DETECTED, self._on_threat)
+
+    def on_remove(self) -> None:
+        """Unsubscribe from the event bus when this villager dies."""
+        self.model.events.unsubscribe(EventType.THREAT_DETECTED, self._on_threat)
 
     def step(self) -> None:
-        """Advance the villager by one tick: move to a random adjacent cell."""
+        """Advance the villager by one tick: sense danger, metabolize, then act."""
         if self.position is None:
             return
 
-        origin = self.position
-        options = [
-            cell
-            for cell in self.model.map.neighbors(origin)
-            if self.model.is_walkable(*cell)
-        ]
-        if not options:
+        self._raise_alarm()
+        self._metabolize()
+        if self.brain is not None:
+            self.brain.update()
+        self._maybe_breed()
+
+    def alarm_position(self) -> Coord | None:
+        """Return the position of an active danger, or ``None`` once it lapses."""
+        if self._alarm is None:
+            return None
+        position, seen = self._alarm
+        if self.model.clock.tick - seen > _ALARM_MEMORY:
+            return None
+        return position
+
+    def _raise_alarm(self) -> None:
+        # Personally spotting a wolf broadcasts its position to every villager.
+        wolf = nearest_of_type(self, AgentType.WOLF)
+        if wolf is not None and wolf.position is not None:
+            self.model.events.publish(
+                Event(
+                    EventType.THREAT_DETECTED,
+                    source=self.unique_id,
+                    payload={"position": wolf.position},
+                )
+            )
+
+    def _on_threat(self, event: Event) -> None:
+        # React only to dangers close enough to matter; keep the most recent.
+        position = event.payload.get("position")
+        if position is None or self.position is None:
             return
+        if _chebyshev(self.position, position) <= _ALARM_RADIUS:
+            self._alarm = (position, self.model.clock.tick)
 
-        destination = self.random.choice(options)
-        self.model.map.move_agent(self, destination)
+    def _maybe_breed(self) -> None:
+        # Content, rested villagers raise families during the day — not in a panic.
+        if self.model.clock.is_night or self.alarm_position() is not None:
+            return
+        if self.needs[Need.HUNGER] > _BREED_HUNGER or self.needs[Need.ENERGY] < _BREED_ENERGY:
+            return
+        try_reproduce(self, chance=_BREED_CHANCE, cap=_POPULATION_CAP)
 
-        _logger.info(
-            "Villager %d moved from (%d,%d) to (%d,%d)",
-            self.unique_id,
-            *origin,
-            *destination,
-        )
+    def _build_brain(self) -> StateMachine:
+        """Assemble the villager's state machine; the first state is the initial one."""
+        brain = StateMachine(self)
+        for state in (WorkingState(), SleepingState(), EatingState(), AlarmedState()):
+            brain.add_state(state)
+        return brain
+
+    def _metabolize(self) -> None:
+        """Apply the constant drift of needs that living costs."""
+        self.needs[Need.HUNGER] = clamp(self.needs[Need.HUNGER] + _HUNGER_PER_TICK)
+        self.needs[Need.ENERGY] = clamp(self.needs[Need.ENERGY] - _ENERGY_PER_TICK)
+
+
+def _chebyshev(a: Coord, b: Coord) -> int:
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]))

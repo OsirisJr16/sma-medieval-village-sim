@@ -41,8 +41,7 @@ class EventBus:
             event_type: The event category to listen for.
             handler: The callback invoked when a matching event is published.
         """
-        # TODO: Append the handler to the subscriber list for this event type.
-        raise NotImplementedError("EventBus.subscribe is not implemented yet.")
+        self.subscribers.setdefault(event_type, []).append(handler)
 
     def unsubscribe(self, event_type: EventType, handler: Subscriber) -> None:
         """Remove a previously registered handler.
@@ -51,8 +50,9 @@ class EventBus:
             event_type: The event category the handler was registered for.
             handler: The callback to remove.
         """
-        # TODO: Remove the handler if present.
-        raise NotImplementedError("EventBus.unsubscribe is not implemented yet.")
+        handlers = self.subscribers.get(event_type)
+        if handlers and handler in handlers:
+            handlers.remove(handler)
 
     def publish(self, event: Event) -> None:
         """Broadcast an event to all matching subscribers.
@@ -60,5 +60,6 @@ class EventBus:
         Args:
             event: The event to dispatch.
         """
-        # TODO: Invoke each subscriber registered for event.type.
-        raise NotImplementedError("EventBus.publish is not implemented yet.")
+        # Iterate a copy so a handler may (un)subscribe during dispatch.
+        for handler in list(self.subscribers.get(event.type, ())):
+            handler(event)

@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     # --- Simulation ----------------------------------------------------------
     max_steps: int = Field(default=20, ge=0, description="0 = run until stopped.")
     initial_villagers: int = Field(default=40, ge=0)
+    initial_guards: int = Field(default=8, ge=0)
+    initial_prey: int = Field(default=50, ge=0)
+    initial_predators: int = Field(default=4, ge=0)
 
     # --- Rendering (Pygame) --------------------------------------------------
     render_enabled: bool = True
@@ -70,9 +73,10 @@ class Settings(BaseSettings):
     # (resizable) window.
     tile_size: int = Field(default=64, ge=1)
     show_grid: bool = False
+    show_sidebar: bool = True
     # Model steps per second when rendering; decoupled from target_fps so the
     # window stays smooth/responsive while movement remains watchable.
-    simulation_fps: int = Field(default=6, ge=1)
+    simulation_fps: int = Field(default=3, ge=1)
 
     # --- Persistence ---------------------------------------------------------
     save_dir: str = "saves"
