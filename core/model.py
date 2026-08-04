@@ -22,6 +22,7 @@ from agents.guard import Guard
 from agents.merchant import Merchant
 from agents.villager import Villager
 from agents.wolf import Wolf
+from ai.pathfinding.astar import AStarPathfinder
 from communication.events import EventType
 from core.logger import get_logger
 from communication.event_bus import EventBus
@@ -96,6 +97,7 @@ class GameModel(mesa.Model):
         self.clock: WorldClock = WorldClock()
         self.events: EventBus = EventBus()
         self.map: Map = Map(width, height, torus=torus)
+        self.pathfinder: AStarPathfinder = AStarPathfinder(self.map, self.is_walkable)
         self.terrain: Terrain = Terrain(width, height)
         self.scenery: Scenery = Scenery.generate(
             width, height, self.random, density=scenery_density

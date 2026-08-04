@@ -61,3 +61,6 @@ mde/generated/*
 
 # macOS archive junk
 __MACOSX/
+
+# Local notes (not tracked)
+AGENTS_CAPABILITIES.md

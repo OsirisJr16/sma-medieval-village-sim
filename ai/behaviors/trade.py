@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from agents.movement import step_toward
+from agents.movement import navigate, step_toward
 from agents.perception import nearest_of_type
 from ai.behaviors import Behavior
 from communication.events import Event, EventType
@@ -130,8 +130,9 @@ class TradeBehavior(Behavior):
     def _reposition(self, agent: BaseAgent) -> None:
         other = nearest_of_type(agent, AgentType.MERCHANT)
         if other is not None and other.position is not None:
-            step_toward(agent, other.position)
+            step_toward(agent, other.position)  # greedy chase of a moving peer
         else:
-            # No peer in sight: head to the market square (map centre) to meet.
+            # No peer in sight: A*-route to the market square (map centre), so
+            # merchants navigate around forests and rocks to converge there.
             model = agent.model
-            step_toward(agent, (model.width // 2, model.height // 2))
+            navigate(agent, (model.width // 2, model.height // 2))
