@@ -46,6 +46,9 @@ _BADGE_MIN_CELL = 16
 # Night tint: color and the opacity it reaches at full darkness.
 _NIGHT_COLOR = (10, 14, 44)
 _MAX_NIGHT_ALPHA = 165
+# Bare-earth tint shown on grazed-down pasture cells.
+_DIRT_COLOR = (120, 90, 58)
+_FOOD_MAX_ALPHA = 150
 # Badge letter and color per agent state.
 _STATE_BADGES: dict[str, tuple[str, tuple[int, int, int]]] = {
     "working": ("W", UI_FOREGROUND),
@@ -106,8 +109,10 @@ class Renderer:
         self.selected: Any = None
         self.paused: bool = False
         self.sim_fps: int = 0
+        self.show_food: bool = True
         self._surface: Surface | None = None
         self._overlay: Surface | None = None
+        self._food_tile_cache: Surface | None = None
         self._hud_font: Any = None
 
     def setup(self) -> None:
@@ -144,11 +149,13 @@ class Renderer:
             self._select_at(event.pos, model)
 
     def handle_key(self, key: int) -> None:
-        """Apply a view-related key press (toggle the graph's scale)."""
+        """Apply a view-related key press (toggle graph scale or food overlay)."""
         import pygame
 
         if key == pygame.K_l and self.ui is not None:
             self.ui.toggle_scale()
+        elif key == pygame.K_f:
+            self.show_food = not self.show_food
 
     def _select_at(self, pos: tuple[int, int], model: GameModel) -> None:
         view_w, _ = self._viewport_size()
@@ -351,6 +358,8 @@ class Renderer:
         cell = self.cell_size
         ground = self.sprites.ground_tile(cell)
         scenery = self.sprites.scenery_sprites(cell)
+        dirt = self._food_tile(cell) if self.show_food else None
+        pasture = model.pasture
         x0, y0, x1, y1 = self._visible_cells(model)
 
         # Rows are drawn top-to-bottom so nearer scenery overlaps what's behind.
@@ -359,6 +368,12 @@ class Renderer:
                 ox, oy = self.camera.world_to_screen((x * cell, y * cell))
                 if ground is not None:
                     self._surface.blit(ground, (int(ox), int(oy)))
+                # Tint grazed-down grass toward bare earth so depletion shows.
+                if dirt is not None and pasture.is_fertile((x, y)):
+                    alpha = int((1.0 - pasture.level((x, y))) * _FOOD_MAX_ALPHA)
+                    if alpha > 8:
+                        dirt.set_alpha(alpha)
+                        self._surface.blit(dirt, (int(ox), int(oy)))
                 kind = model.scenery.get(x, y)
                 if kind is None:
                     continue
@@ -366,6 +381,15 @@ class Renderer:
                 if variants:
                     prop = variants[_cell_hash(x, y, 0xC0FFEE) % len(variants)]
                     self._blit_standing(prop, ox, oy, cell)
+
+    def _food_tile(self, cell: int) -> Surface:
+        """A reusable bare-earth tile whose alpha the caller sets per cell."""
+        import pygame
+
+        if self._food_tile_cache is None or self._food_tile_cache.get_width() != cell:
+            self._food_tile_cache = pygame.Surface((cell, cell))
+            self._food_tile_cache.fill(_DIRT_COLOR)
+        return self._food_tile_cache
 
     def _blit_standing(self, prop: Surface, ox: float, oy: float, cell: int) -> None:
         """Blit a prop centred on its cell and resting on the cell's base."""

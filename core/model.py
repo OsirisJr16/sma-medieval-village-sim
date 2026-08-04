@@ -24,13 +24,24 @@ from core.logger import get_logger
 from communication.event_bus import EventBus
 from world.clock import WorldClock
 from world.map import Map
+from world.pasture import Pasture
 from world.scenery import Scenery
+from world.season import SeasonType
 from world.terrain import Terrain
 
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
 
 _logger = get_logger(__name__)
+
+# Base grass regrowth per tick, and the seasonal multiplier applied to it.
+_REGROW_BASE = 0.015
+_SEASON_GROWTH = {
+    SeasonType.SPRING: 1.3,
+    SeasonType.SUMMER: 1.0,
+    SeasonType.AUTUMN: 0.6,
+    SeasonType.WINTER: 0.15,
+}
 
 
 class GameModel(mesa.Model):
@@ -82,6 +93,10 @@ class GameModel(mesa.Model):
         self.scenery: Scenery = Scenery.generate(
             width, height, self.random, density=scenery_density
         )
+        # Grass grows only where agents can stand (open, walkable ground).
+        self.pasture: Pasture = Pasture.generate(
+            width, height, self.is_walkable, self.random
+        )
 
         self._spawn(Villager, num_villagers)
         self._spawn(Guard, num_guards)
@@ -122,8 +137,9 @@ class GameModel(mesa.Model):
             self.map.place_agent(agent, self.random.choice(open_cells))
 
     def step(self) -> None:
-        """Advance time by one hour, then activate every agent."""
+        """Advance time, regrow grass by the season, then activate every agent."""
         self.clock.advance()
         if self.clock.hour == 0:
             _logger.info("Day %d dawns (%s).", self.clock.day + 1, self.clock.season.current.value)
+        self.pasture.regrow(_REGROW_BASE * _SEASON_GROWTH[self.clock.season.current])
         self.agents.shuffle_do("step")
