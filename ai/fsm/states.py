@@ -22,6 +22,7 @@ from agents.movement import step_away, step_toward, wander
 from agents.needs import Need
 from agents.perception import is_adjacent, nearest_of_type
 from ai.behaviors.eat import EatBehavior
+from ai.behaviors.graze import GrazeBehavior
 from ai.behaviors.sleep import SleepBehavior
 from ai.behaviors.work import WorkBehavior
 from ai.fsm.state import State
@@ -262,8 +263,8 @@ class GrazingState(State):
     name: str = "grazing"
 
     def __init__(self) -> None:
-        """Bind the eat behavior; for an animal, grazing *is* eating."""
-        self._behavior = EatBehavior()
+        """Bind the graze behavior (eats grass from the pasture)."""
+        self._behavior = GrazeBehavior()
 
     def execute(self, agent: BaseAgent) -> None:
         """Graze for one tick.

@@ -169,6 +169,13 @@ class UI:
         if lit > 0:
             tint = (150, 150, 170) if clock.is_night else (238, 205, 120)
             pygame.draw.rect(surface, tint, (x, y, lit, bar_h), border_radius=3)
+        y += bar_h + 4
+
+        # Forage: average grass across the pasture (seasonal food abundance).
+        pygame.draw.rect(surface, _GRAPH_BG, (x, y, w, bar_h), border_radius=3)
+        grass = round(w * model.pasture.average())
+        if grass > 0:
+            pygame.draw.rect(surface, (110, 168, 92), (x, y, grass, bar_h), border_radius=3)
         return y + bar_h
 
     # --- Population history graph ---------------------------------------------
@@ -352,7 +359,7 @@ class UI:
             status = self._body_font.render(f"{sim_fps} steps/s", True, _MUTED)
         surface.blit(status, (x, y))
         y += status.get_height() + 6
-        for line in ("space pause · +/- speed", "L scale · click to inspect"):
+        for line in ("space pause · +/- speed · F food", "L scale · click to inspect"):
             surface.blit(self._small_font.render(line, True, (120, 126, 140)), (x, y))
             y += self._small_font.get_height() + 1
 
