@@ -67,6 +67,9 @@ def bootstrap(*, headless: bool = False) -> Application:
         settings.grid_width,
         settings.grid_height,
         num_villagers=settings.initial_villagers,
+        num_guards=settings.initial_guards,
+        num_prey=settings.initial_prey,
+        num_predators=settings.initial_predators,
         torus=settings.grid_torus,
         scenery_density=settings.scenery_density,
         seed=settings.random_seed,
@@ -81,6 +84,7 @@ def bootstrap(*, headless: bool = False) -> Application:
             settings.window_height,
             max_tile_size=settings.tile_size,
             show_grid=settings.show_grid,
+            show_sidebar=settings.show_sidebar,
         )
 
     engine = Engine(

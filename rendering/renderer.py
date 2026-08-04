@@ -16,9 +16,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from config.colors import DARK_GRAY, UI_BACKGROUND, VILLAGER_COLOR
+from config.colors import (
+    DARK_GRAY,
+    GUARD_COLOR,
+    UI_ACCENT,
+    UI_BACKGROUND,
+    UI_FOREGROUND,
+    VILLAGER_COLOR,
+    WATER_BLUE,
+    WOLF_COLOR,
+)
+from config.constants import AgentType
 from rendering.camera import Camera
 from rendering.sprite_manager import SpriteManager
+from rendering.ui import UI
 
 if TYPE_CHECKING:
     from core.model import GameModel
@@ -30,6 +41,19 @@ _CAPTION = "Medieval Village Simulation"
 _ZOOM_LEVELS: tuple[int, ...] = (8, 12, 16, 24, 32, 48, 64)
 # Extra rows drawn above the viewport so tall props (trees) scroll in smoothly.
 _OVERDRAW_ROWS = 3
+# Below this cell size, per-agent state badges are more clutter than signal.
+_BADGE_MIN_CELL = 16
+# Night tint: color and the opacity it reaches at full darkness.
+_NIGHT_COLOR = (10, 14, 44)
+_MAX_NIGHT_ALPHA = 165
+# Badge letter and color per agent state.
+_STATE_BADGES: dict[str, tuple[str, tuple[int, int, int]]] = {
+    "working": ("W", UI_FOREGROUND),
+    "eating": ("E", UI_ACCENT),
+    "sleeping": ("Z", WATER_BLUE),
+    "alarmed": ("!", (235, 110, 90)),
+    "defending": ("D", (150, 175, 240)),
+}
 
 
 def _cell_hash(x: int, y: int, salt: int) -> int:
@@ -57,6 +81,7 @@ class Renderer:
         *,
         max_tile_size: int = 64,
         show_grid: bool = False,
+        show_sidebar: bool = True,
     ) -> None:
         """Initialize the renderer configuration and helpers.
 
@@ -68,6 +93,7 @@ class Renderer:
             height: Initial window height in pixels.
             max_tile_size: Largest selectable cell size, in pixels.
             show_grid: Whether to overlay cell grid lines.
+            show_sidebar: Whether to reserve and draw the stats sidebar.
         """
         self.width: int = width
         self.height: int = height
@@ -75,8 +101,14 @@ class Renderer:
         self.show_grid: bool = show_grid
         self.camera: Camera = Camera(width, height)
         self.sprites: SpriteManager = SpriteManager()
+        self.ui: UI | None = UI() if show_sidebar else None
         self.cell_size: int = 0
+        self.selected: Any = None
+        self.paused: bool = False
+        self.sim_fps: int = 0
         self._surface: Surface | None = None
+        self._overlay: Surface | None = None
+        self._hud_font: Any = None
 
     def setup(self) -> None:
         """Create the resizable display window (requires Pygame initialized)."""
@@ -97,16 +129,37 @@ class Renderer:
 
         self._surface = pygame.display.set_mode(size, pygame.RESIZABLE)
 
-    def handle_event(self, event: Any) -> None:
-        """Apply a window event that affects the view (mouse-wheel zoom).
+    def handle_event(self, event: Any, model: GameModel) -> None:
+        """Apply a window event affecting the view (zoom, agent selection).
 
         Args:
             event: A Pygame event.
+            model: The model, used to resolve a clicked cell to an agent.
         """
         import pygame
 
         if event.type == pygame.MOUSEWHEEL:
             self.zoom(1 if event.y > 0 else -1)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self._select_at(event.pos, model)
+
+    def handle_key(self, key: int) -> None:
+        """Apply a view-related key press (toggle the graph's scale)."""
+        import pygame
+
+        if key == pygame.K_l and self.ui is not None:
+            self.ui.toggle_scale()
+
+    def _select_at(self, pos: tuple[int, int], model: GameModel) -> None:
+        view_w, _ = self._viewport_size()
+        if pos[0] >= view_w or not self.cell_size:
+            return  # A click in the sidebar clears nothing.
+        cell = (
+            int((pos[0] + self.camera.x) / self.cell_size),
+            int((pos[1] + self.camera.y) / self.cell_size),
+        )
+        agents = model.map.agents_at(cell)
+        self.selected = agents[0] if agents else None
 
     def handle_input(self) -> None:
         """Pan the camera from the currently held arrow/WASD keys."""
@@ -139,7 +192,7 @@ class Renderer:
         if target == current:
             return
 
-        win_w, win_h = self._surface.get_size()
+        win_w, win_h = self._viewport_size()
         centre_x = (self.camera.x + win_w / 2) / self.cell_size
         centre_y = (self.camera.y + win_h / 2) / self.cell_size
         self.cell_size = levels[target]
@@ -159,21 +212,99 @@ class Renderer:
 
         if not self.cell_size:
             self.cell_size = self._initial_cell_size(model)
+        # Drop a selection whose agent has since died.
+        if self.selected is not None and getattr(self.selected, "pos", None) is None:
+            self.selected = None
         self._clamp_camera(model)
 
         self._surface.fill(UI_BACKGROUND)
         self._draw_world(model)
         if self.show_grid:
             self._draw_grid(model)
-        self._draw_villagers(model)
+        self._draw_agents(model)
+        self._draw_night(model)
+        self._draw_selection(model)
+        if self.ui is not None:
+            self.ui.draw(
+                self._surface,
+                model,
+                self._viewport_size()[0],
+                selected=self.selected,
+                paused=self.paused,
+                sim_fps=self.sim_fps,
+            )
+        else:
+            self._draw_clock(model)
         pygame.display.flip()
+
+    def _draw_selection(self, model: GameModel) -> None:
+        """Ring the selected agent so it stands out (drawn above the night tint)."""
+        if self.selected is None:
+            return
+        position = getattr(self.selected, "position", None)
+        if position is None:
+            return
+        x0, y0, x1, y1 = self._visible_cells(model)
+        if not (x0 <= position[0] < x1 and y0 <= position[1] < y1):
+            return
+        import pygame
+
+        cell = self.cell_size
+        ox, oy = self.camera.world_to_screen((position[0] * cell, position[1] * cell))
+        centre = (int(ox + cell / 2), int(oy + cell / 2))
+        pygame.draw.circle(self._surface, UI_ACCENT, centre, int(cell * 0.6), 2)
 
     def shutdown(self) -> None:
         """Release rendering resources and quit Pygame."""
         import pygame
 
         self.sprites.clear()
+        self._overlay = None
+        self._hud_font = None
         pygame.quit()
+
+    def _draw_night(self, model: GameModel) -> None:
+        """Darken the world according to the world clock's daylight level."""
+        alpha = round((1.0 - model.clock.daylight) * _MAX_NIGHT_ALPHA)
+        if alpha <= 0:
+            return
+        import pygame
+
+        # Cover only the world view so the sidebar stays legible at night.
+        view_w, _ = self._viewport_size()
+        size = (view_w, self._surface.get_height())
+        if self._overlay is None or self._overlay.get_size() != size:
+            self._overlay = pygame.Surface(size)
+            self._overlay.fill(_NIGHT_COLOR)
+        self._overlay.set_alpha(alpha)
+        self._surface.blit(self._overlay, (0, 0))
+
+    def _draw_clock(self, model: GameModel) -> None:
+        """Draw the date and time of day in the top-left corner."""
+        import pygame
+
+        if self._hud_font is None:
+            self._hud_font = pygame.font.Font(None, 26)
+        clock = model.clock
+        text = (
+            f"{clock.season.current.value.title()}  ·  "
+            f"Day {clock.day + 1}  ·  {clock.hour:02d}:00"
+        )
+        label = self._hud_font.render(text, True, UI_FOREGROUND)
+        pad = 6
+        backing = pygame.Surface(
+            (label.get_width() + pad * 2, label.get_height() + pad * 2)
+        )
+        backing.set_alpha(160)
+        backing.fill(UI_BACKGROUND)
+        self._surface.blit(backing, (8, 8))
+        self._surface.blit(label, (8 + pad, 8 + pad))
+
+    def _viewport_size(self) -> tuple[int, int]:
+        """Size of the world view: the window minus the stats sidebar."""
+        win_w, win_h = self._surface.get_size()
+        sidebar = self.ui.width if self.ui is not None else 0
+        return max(1, win_w - sidebar), win_h
 
     def _zoom_levels(self) -> tuple[int, ...]:
         levels = tuple(z for z in _ZOOM_LEVELS if z <= self.max_tile_size)
@@ -181,7 +312,7 @@ class Renderer:
 
     def _initial_cell_size(self, model: GameModel) -> int:
         """Pick the largest zoom level that shows the whole world, if any."""
-        win_w, win_h = self._surface.get_size()
+        win_w, win_h = self._viewport_size()
         levels = self._zoom_levels()
         fitting = [
             z
@@ -192,7 +323,7 @@ class Renderer:
 
     def _clamp_camera(self, model: GameModel) -> None:
         """Centre each axis when the world fits, otherwise keep it in view."""
-        win_w, win_h = self._surface.get_size()
+        win_w, win_h = self._viewport_size()
         world_w = model.width * self.cell_size
         world_h = model.height * self.cell_size
         self.camera.x = (
@@ -208,7 +339,7 @@ class Renderer:
 
     def _visible_cells(self, model: GameModel) -> tuple[int, int, int, int]:
         """Return the ``(x0, y0, x1, y1)`` cell range covering the viewport."""
-        win_w, win_h = self._surface.get_size()
+        win_w, win_h = self._viewport_size()
         cell = self.cell_size
         x0 = max(0, int(self.camera.x // cell))
         y0 = max(0, int(self.camera.y // cell) - _OVERDRAW_ROWS)
@@ -242,6 +373,12 @@ class Renderer:
         py = oy + cell - prop.get_height()
         self._surface.blit(prop, (int(px), int(py)))
 
+    def _blit_centered(self, prop: Surface, ox: float, oy: float, cell: int) -> None:
+        """Blit a prop centred within its cell."""
+        px = ox + (cell - prop.get_width()) // 2
+        py = oy + (cell - prop.get_height()) // 2
+        self._surface.blit(prop, (int(px), int(py)))
+
     def _draw_grid(self, model: GameModel) -> None:
         import pygame
 
@@ -258,20 +395,48 @@ class Renderer:
             sy = self.camera.world_to_screen((0, y * cell))[1]
             pygame.draw.line(self._surface, DARK_GRAY, (left, sy), (right, sy))
 
-    def _draw_villagers(self, model: GameModel) -> None:
+    def _draw_agents(self, model: GameModel) -> None:
         cell = self.cell_size
-        sprites = self.sprites.villager_sprites(cell)
-        marker = None if sprites else self.sprites.circle(cell, VILLAGER_COLOR)
+        villagers = self.sprites.villager_sprites(cell)
+        prey = self.sprites.prey_sprites(cell)
+        wolf = self.sprites.circle(max(6, round(cell * 0.7)), WOLF_COLOR)
+        fallback = self.sprites.circle(cell, VILLAGER_COLOR)
+        x0, y0, x1, y1 = self._visible_cells(model)
         for agent in model.agents:
             position = getattr(agent, "position", None)
-            if position is None:
+            if position is None or not (x0 <= position[0] < x1 and y0 <= position[1] < y1):
                 continue
-            # A stable per-villager sprite keeps identities consistent frame to
-            # frame without storing presentation state on the model.
-            image = sprites[agent.unique_id % len(sprites)] if sprites else marker
-            if image is None:
-                continue
+
+            kind = getattr(agent, "agent_type", None)
             ox, oy = self.camera.world_to_screen(
                 (position[0] * cell, position[1] * cell)
             )
+            if kind is AgentType.WOLF:
+                self._blit_centered(wolf, ox, oy, cell)
+                continue
+
+            # A stable per-agent sprite keeps identities consistent frame to
+            # frame without storing presentation state on the model.
+            roster = prey if kind is AgentType.DEER else villagers
+            image = roster[agent.unique_id % len(roster)] if roster else fallback
             self._blit_standing(image, ox, oy, cell)
+            if kind is AgentType.GUARD:
+                import pygame
+
+                centre = (int(ox + cell / 2), int(oy + cell / 2))
+                pygame.draw.circle(self._surface, GUARD_COLOR, centre, int(cell * 0.5), 2)
+            if kind is not AgentType.DEER and cell >= _BADGE_MIN_CELL:
+                self._draw_state_badge(agent, ox, oy, cell)
+
+    def _draw_state_badge(self, agent: Any, ox: float, oy: float, cell: int) -> None:
+        """Annotate an agent with a letter showing what it is currently doing."""
+        brain = getattr(agent, "brain", None)
+        state = getattr(brain, "current", None)
+        entry = _STATE_BADGES.get(getattr(state, "name", ""))
+        if entry is None:
+            return
+
+        label, color = entry
+        badge = self.sprites.badge(label, cell, color)
+        px = ox + (cell - badge.get_width()) // 2
+        self._surface.blit(badge, (int(px), int(oy - badge.get_height() * 0.35)))

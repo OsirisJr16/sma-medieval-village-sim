@@ -43,6 +43,7 @@ class Engine:
         self.target_fps: int = target_fps
         self.simulation_fps: int = simulation_fps
         self.running: bool = False
+        self.paused: bool = False
 
     def run(self, max_steps: int = 0) -> None:
         """Run the main loop until stopped.
@@ -79,9 +80,9 @@ class Engine:
         pygame.init()
         self.renderer.setup()
         clock = pygame.time.Clock()
-        frames_per_step = max(1, round(self.target_fps / self.simulation_fps))
 
         self.running = True
+        self.paused = False
         done = False
         frame = 0
         tick = 0
@@ -92,22 +93,28 @@ class Engine:
                         self.running = False
                     elif event.type == pygame.VIDEORESIZE:
                         self.renderer.resize(event.size)
+                    elif event.type == pygame.KEYDOWN:
+                        self._handle_control_key(event.key)
                     else:
-                        self.renderer.handle_event(event)
+                        self.renderer.handle_event(event, self.model)
                 if not self.running:
                     break
                 self.renderer.handle_input()
 
-                # Advance the model on the fixed simulation cadence; once the
-                # step budget is spent, keep the window responsive on its final
-                # frame until the user closes it.
-                if not done and frame % frames_per_step == 0:
+                # Reflect current controls in the HUD.
+                self.renderer.paused = self.paused
+                self.renderer.sim_fps = self.simulation_fps
+                frames_per_step = max(1, round(self.target_fps / self.simulation_fps))
+
+                # Advance the model on the fixed simulation cadence (unless
+                # paused); once the step budget is spent, keep the window
+                # responsive on its final frame until the user closes it.
+                if not self.paused and not done and frame % frames_per_step == 0:
                     if max_steps and tick >= max_steps:
                         done = True
                         _logger.info("Reached max steps (%d).", max_steps)
                     else:
                         tick += 1
-                        _logger.info("Tick %d", tick)
                         self.model.step()
 
                 self.renderer.render(self.model)
@@ -117,6 +124,18 @@ class Engine:
             self.renderer.shutdown()
             self.running = False
             _logger.info("Simulation finished.")
+
+    def _handle_control_key(self, key: int) -> None:
+        import pygame
+
+        if key == pygame.K_SPACE:
+            self.paused = not self.paused
+        elif key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+            self.simulation_fps = min(30, self.simulation_fps + 1)
+        elif key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+            self.simulation_fps = max(1, self.simulation_fps - 1)
+        elif self.renderer is not None:
+            self.renderer.handle_key(key)
 
     def stop(self) -> None:
         """Request that the main loop terminate."""

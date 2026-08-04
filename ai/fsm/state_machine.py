@@ -11,10 +11,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from core.logger import get_logger
+
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
 
     from ai.fsm.state import State
+
+_logger = get_logger(__name__)
 
 
 class StateMachine:
@@ -39,24 +43,51 @@ class StateMachine:
     def add_state(self, state: State) -> None:
         """Register a state with the machine.
 
+        The first state registered becomes the initial state.
+
         Args:
             state: The state instance to register (keyed by ``state.name``).
         """
-        # TODO: Store the state and optionally set it as the initial state.
-        raise NotImplementedError("StateMachine.add_state is not implemented yet.")
+        self.states[state.name] = state
+        if self.current is None:
+            self.current = state
+            state.on_enter(self.owner)
 
     def transition_to(self, name: str) -> None:
         """Switch the active state, firing exit/enter hooks.
 
         Args:
             name: The name of the state to activate.
+
+        Raises:
+            KeyError: If no state is registered under ``name``.
         """
-        # TODO: Call current.on_exit, set current, call new.on_enter.
-        raise NotImplementedError(
-            "StateMachine.transition_to is not implemented yet."
+        state = self.states.get(name)
+        if state is None:
+            raise KeyError(f"Unknown state: {name!r}")
+        if state is self.current:
+            return
+
+        previous = self.current
+        if previous is not None:
+            previous.on_exit(self.owner)
+        self.current = state
+        state.on_enter(self.owner)
+
+        _logger.info(
+            "%s %d: %s -> %s",
+            type(self.owner).__name__,
+            self.owner.unique_id,
+            previous.name if previous else "-",
+            state.name,
         )
 
     def update(self) -> None:
-        """Run the current state's per-tick logic and evaluate transitions."""
-        # TODO: Delegate to self.current.execute(self.owner) and check guards.
-        raise NotImplementedError("StateMachine.update is not implemented yet.")
+        """Evaluate the current state's transition, then run its per-tick logic."""
+        if self.current is None:
+            return
+
+        target = self.current.next_state(self.owner)
+        if target is not None and target != self.current.name:
+            self.transition_to(target)
+        self.current.execute(self.owner)

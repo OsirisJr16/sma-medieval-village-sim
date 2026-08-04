@@ -52,6 +52,10 @@ class BaseAgent(mesa.Agent, ABC):
 
         self.position: Coord | None = None
 
+        # How many cells this agent can sense; 0 means it perceives nothing
+        # (and pays no perception cost). Subclasses that interact raise it.
+        self.vision: int = 0
+
         # TODO: Define per-role needs and their decay in subclasses.
         self.needs: dict[str, float] = {}
 
@@ -72,11 +76,30 @@ class BaseAgent(mesa.Agent, ABC):
         """
         raise NotImplementedError
 
-    def perceive(self) -> None:
-        """Gather information about the local environment.
+    def perceive(self) -> list[BaseAgent]:
+        """Return the living agents within this agent's vision radius.
 
-        Sense-phase hook, kept separate from :meth:`step` so a perceive → decide
-        → act pipeline can be composed uniformly across agent types.
+        Sense-phase hook: decision logic (states/behaviors) queries the result
+        rather than reaching into the grid directly.
+
+        Returns:
+            Nearby living agents, or an empty list when blind or unplaced.
         """
-        # TODO: Populate a perception snapshot (neighbors, threats, resources).
-        raise NotImplementedError("BaseAgent.perceive is not implemented yet.")
+        if self.vision <= 0 or self.position is None:
+            return []
+        near = self.model.map.agents_near(self.position, self.vision)
+        return [agent for agent in near if agent is not self and agent.alive]
+
+    def die(self) -> None:
+        """Remove this agent from the world (grid and scheduler)."""
+        if not self.alive:
+            return
+        self.alive = False
+        self.on_remove()
+        if self.pos is not None:
+            self.model.map.grid.remove_agent(self)
+        self.position = None
+        self.remove()
+
+    def on_remove(self) -> None:
+        """Hook for teardown just before removal (e.g. unsubscribe from buses)."""
