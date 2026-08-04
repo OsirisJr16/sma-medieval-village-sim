@@ -58,9 +58,11 @@ class Settings(BaseSettings):
     )
 
     # --- Simulation ----------------------------------------------------------
-    max_steps: int = Field(default=20, ge=0, description="0 = run until stopped.")
+    max_steps: int = Field(default=0, ge=0, description="0 = run until stopped.")
     initial_villagers: int = Field(default=40, ge=0)
     initial_guards: int = Field(default=8, ge=0)
+    initial_farmers: int = Field(default=12, ge=0)
+    initial_merchants: int = Field(default=6, ge=0)
     initial_prey: int = Field(default=50, ge=0)
     initial_predators: int = Field(default=4, ge=0)
 

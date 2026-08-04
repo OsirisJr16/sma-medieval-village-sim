@@ -1,7 +1,8 @@
 """Eat behavior.
 
-Consumes food from the agent's inventory (or a nearby source) to restore the
-hunger need. Applicable to villagers and wildlife alike.
+A villager draws a meal from the village granary to restore hunger. The granary
+is stocked by farmers, so eating now depends on production: an empty granary
+means the meal — and the hunger relief — simply is not there.
 """
 
 from __future__ import annotations
@@ -14,8 +15,9 @@ from ai.behaviors import Behavior
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
 
-#: Hunger removed per tick spent eating.
-_RESTORE_PER_TICK: Final[float] = 0.06
+#: Food drawn from the granary per tick, and hunger removed per unit eaten.
+_MEAL: Final[float] = 0.09
+_HUNGER_PER_FOOD: Final[float] = 1.0
 
 
 class EatBehavior(Behavior):
@@ -40,8 +42,11 @@ class EatBehavior(Behavior):
         Args:
             agent: The agent performing the behavior.
         """
-        # TODO: Draw the meal from an inventory/food source once the economy
-        #       exists; for now eating is simply available wherever the agent is.
+        model = agent.model
+        served = min(_MEAL, model.granary)
+        if served <= 0.0:
+            return  # Empty granary: nothing to eat this tick.
+        model.granary -= served
         agent.needs[Need.HUNGER] = clamp(
-            agent.needs.get(Need.HUNGER, 0.0) - _RESTORE_PER_TICK
+            agent.needs.get(Need.HUNGER, 0.0) - served * _HUNGER_PER_FOOD
         )

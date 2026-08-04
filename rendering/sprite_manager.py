@@ -39,6 +39,10 @@ _TILESET = Path("assets/fileds_tileset")
 _OBJECTS = _TILESET / "2 Objects"
 _GROUND_TILE = _TILESET / "1 Tiles" / "FieldsTile_38.png"
 
+# Plowed-field tile colors (procedural: brown earth with darker furrows).
+_SOIL: RGB = (138, 100, 62)
+_FURROW: RGB = (104, 74, 46)
+
 # Prey animals whose first animation frame is a clean front-facing pose.
 _PREY_DIR = Path("assets/prey/PNG/Without_shadow")
 _PREY_ANIMALS: tuple[str, ...] = (
@@ -92,6 +96,7 @@ class SpriteManager:
         self._villagers: dict[int, list[Surface]] = {}
         self._prey: dict[int, list[Surface]] = {}
         self._ground: dict[int, Surface] = {}
+        self._fields: dict[int, Surface] = {}
         self._scenery: dict[int, dict[SceneryType, list[Surface]]] = {}
         self._badges: dict[tuple[str, int, RGB], Surface] = {}
 
@@ -139,6 +144,20 @@ class SpriteManager:
         if cell not in self._ground:
             self._ground[cell] = self._load_scaled(_GROUND_TILE, (cell, cell))
         return self._ground[cell]
+
+    def field_tile(self, cell: int) -> Surface:
+        """Return a cached plowed-soil tile (brown earth with furrows)."""
+        tile = self._fields.get(cell)
+        if tile is None:
+            import pygame
+
+            tile = pygame.Surface((cell, cell))
+            tile.fill(_SOIL)
+            spacing = max(3, cell // 5)
+            for y in range(spacing // 2, cell, spacing):
+                pygame.draw.line(tile, _FURROW, (0, y), (cell, y))
+            self._fields[cell] = tile
+        return tile
 
     def scenery_sprites(self, cell: int) -> dict[SceneryType, list[Surface]]:
         """Return every scenery variant, scaled relative to a cell.
@@ -206,6 +225,7 @@ class SpriteManager:
         self._villagers.clear()
         self._prey.clear()
         self._ground.clear()
+        self._fields.clear()
         self._scenery.clear()
         self._badges.clear()
 

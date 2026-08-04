@@ -37,8 +37,7 @@ class Mailbox:
         Args:
             message: The message to send.
         """
-        # TODO: Append to the outbox (delivery handled by the messaging system).
-        raise NotImplementedError("Mailbox.post is not implemented yet.")
+        self.outbox.append(message)
 
     def deliver(self, message: Message) -> None:
         """Place an incoming message into the inbox.
@@ -46,8 +45,7 @@ class Mailbox:
         Args:
             message: The message being delivered to this agent.
         """
-        # TODO: Append to the inbox.
-        raise NotImplementedError("Mailbox.deliver is not implemented yet.")
+        self.inbox.append(message)
 
     def read(self) -> Message | None:
         """Pop and return the next incoming message, if any.
@@ -55,5 +53,8 @@ class Mailbox:
         Returns:
             The next message, or ``None`` when the inbox is empty.
         """
-        # TODO: Pop from the inbox (FIFO).
-        raise NotImplementedError("Mailbox.read is not implemented yet.")
+        return self.inbox.popleft() if self.inbox else None
+
+    def has_mail(self) -> bool:
+        """Return whether the inbox holds any unread messages."""
+        return bool(self.inbox)

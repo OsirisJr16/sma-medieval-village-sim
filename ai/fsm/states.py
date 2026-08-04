@@ -22,8 +22,10 @@ from agents.movement import step_away, step_toward, wander
 from agents.needs import Need
 from agents.perception import is_adjacent, nearest_of_type
 from ai.behaviors.eat import EatBehavior
+from ai.behaviors.farm import FarmBehavior
 from ai.behaviors.graze import GrazeBehavior
 from ai.behaviors.sleep import SleepBehavior
+from ai.behaviors.trade import TradeBehavior
 from ai.behaviors.work import WorkBehavior
 from ai.fsm.state import State
 from config.constants import AgentType
@@ -48,6 +50,17 @@ def _alarm(agent: BaseAgent) -> tuple[int, int] | None:
     """The position of an active danger the agent has been warned about, if any."""
     getter = getattr(agent, "alarm_position", None)
     return getter() if getter is not None else None
+
+
+def _daily_next(agent: BaseAgent) -> str | None:
+    """Transition shared by working roles: flee danger, else eat / sleep."""
+    if _alarm(agent) is not None:
+        return agent.THREAT_STATE
+    if agent.needs.get(Need.HUNGER, 0.0) >= _HUNGRY:
+        return EatingState.name
+    if _is_night(agent) or agent.needs.get(Need.ENERGY, 1.0) <= _TIRED:
+        return SleepingState.name
+    return None
 
 #: Hunger levels bounding a prey animal's graze/wander cycle.
 _PREY_HUNGRY: Final[float] = 0.55
@@ -83,13 +96,7 @@ class WorkingState(State):
         Returns:
             The next state's name, or ``None`` to keep working.
         """
-        if _alarm(agent) is not None:
-            return agent.THREAT_STATE
-        if agent.needs.get(Need.HUNGER, 0.0) >= _HUNGRY:
-            return EatingState.name
-        if _is_night(agent) or agent.needs.get(Need.ENERGY, 1.0) <= _TIRED:
-            return SleepingState.name
-        return None
+        return _daily_next(agent)
 
 
 class SleepingState(State):
@@ -121,7 +128,7 @@ class SleepingState(State):
         if _alarm(agent) is not None:
             return agent.THREAT_STATE
         if not _is_night(agent) and agent.needs.get(Need.ENERGY, 1.0) >= _RESTED:
-            return WorkingState.name
+            return agent.WORK_STATE
         return None
 
 
@@ -154,7 +161,10 @@ class EatingState(State):
         if _alarm(agent) is not None:
             return agent.THREAT_STATE
         if agent.needs.get(Need.HUNGER, 0.0) <= _FED:
-            return SleepingState.name if _is_night(agent) else WorkingState.name
+            return SleepingState.name if _is_night(agent) else agent.WORK_STATE
+        # Nothing left to eat: resume work (a farmer will restock the granary).
+        if agent.model.granary <= 0.0:
+            return SleepingState.name if _is_night(agent) else agent.WORK_STATE
         if agent.needs.get(Need.ENERGY, 1.0) <= _TIRED:
             return SleepingState.name
         return None
@@ -188,7 +198,7 @@ class AlarmedState(State):
         """
         if _alarm(agent) is not None:
             return None
-        return SleepingState.name if _is_night(agent) else WorkingState.name
+        return SleepingState.name if _is_night(agent) else agent.WORK_STATE
 
 
 class DefendingState(State):
@@ -225,7 +235,65 @@ class DefendingState(State):
         """
         if _alarm(agent) is not None or nearest_of_type(agent, AgentType.WOLF) is not None:
             return None
-        return SleepingState.name if _is_night(agent) else WorkingState.name
+        return SleepingState.name if _is_night(agent) else agent.WORK_STATE
+
+
+class FarmingState(State):
+    """Harvest grass into the granary as the farmer's daily labor."""
+
+    name: str = "farming"
+
+    def __init__(self) -> None:
+        """Bind the farm behavior."""
+        self._behavior = FarmBehavior()
+
+    def execute(self, agent: BaseAgent) -> None:
+        """Reap grass for one tick.
+
+        Args:
+            agent: The farming villager.
+        """
+        self._behavior.execute(agent)
+
+    def next_state(self, agent: BaseAgent) -> str | None:
+        """Break for food, rest, or danger like any other worker.
+
+        Args:
+            agent: The farming villager.
+
+        Returns:
+            The next state's name, or ``None`` to keep farming.
+        """
+        return _daily_next(agent)
+
+
+class TradingState(State):
+    """Buy, sell, and haggle food for gold as the merchant's daily labor."""
+
+    name: str = "trading"
+
+    def __init__(self) -> None:
+        """Bind the trade behavior."""
+        self._behavior = TradeBehavior()
+
+    def execute(self, agent: BaseAgent) -> None:
+        """Trade for one tick.
+
+        Args:
+            agent: The merchant.
+        """
+        self._behavior.execute(agent)
+
+    def next_state(self, agent: BaseAgent) -> str | None:
+        """Break for food, rest, or danger like any other worker.
+
+        Args:
+            agent: The merchant.
+
+        Returns:
+            The next state's name, or ``None`` to keep trading.
+        """
+        return _daily_next(agent)
 
 
 class WanderingState(State):

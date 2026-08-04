@@ -37,6 +37,8 @@ class Pasture:
         self.height: int = height
         self._level: list[list[float]] = [[0.0] * width for _ in range(height)]
         self._fertile: list[list[bool]] = [[False] * width for _ in range(height)]
+        # Cells a farmer has worked; cleared once the grass fully reclaims them.
+        self._tilled: list[list[bool]] = [[False] * width for _ in range(height)]
 
     @classmethod
     def generate(
@@ -75,6 +77,17 @@ class Pasture:
         x, y = coord
         return self._level[y][x]
 
+    def till(self, coord: Coord) -> None:
+        """Mark a cell as worked farmland (shown as a plowed plot)."""
+        x, y = coord
+        if self._fertile[y][x]:
+            self._tilled[y][x] = True
+
+    def is_tilled(self, coord: Coord) -> bool:
+        """Return whether a cell is currently worked farmland."""
+        x, y = coord
+        return self._tilled[y][x]
+
     def graze(self, coord: Coord, bite: float) -> float:
         """Consume up to ``bite`` of grass at a cell.
 
@@ -101,9 +114,13 @@ class Pasture:
         for y in range(self.height):
             row = self._level[y]
             fertile = self._fertile[y]
+            tilled = self._tilled[y]
             for x in range(self.width):
                 if fertile[x] and row[x] < 1.0:
                     row[x] = min(1.0, row[x] + rate)
+                    # Grass has reclaimed the plot; it is no longer farmland.
+                    if tilled[x] and row[x] >= 0.85:
+                        tilled[x] = False
 
     def average(self) -> float:
         """Return the mean grass level over fertile cells (``0`` if none)."""

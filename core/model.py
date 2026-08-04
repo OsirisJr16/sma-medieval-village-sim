@@ -17,9 +17,12 @@ from typing import TYPE_CHECKING
 import mesa
 
 from agents.deer import Deer
+from agents.farmer import Farmer
 from agents.guard import Guard
+from agents.merchant import Merchant
 from agents.villager import Villager
 from agents.wolf import Wolf
+from communication.events import EventType
 from core.logger import get_logger
 from communication.event_bus import EventBus
 from world.clock import WorldClock
@@ -61,6 +64,8 @@ class GameModel(mesa.Model):
         *,
         num_villagers: int,
         num_guards: int = 0,
+        num_farmers: int = 0,
+        num_merchants: int = 0,
         num_prey: int = 0,
         num_predators: int = 0,
         torus: bool = False,
@@ -74,6 +79,8 @@ class GameModel(mesa.Model):
             height: Grid height in cells.
             num_villagers: Number of villagers to spawn.
             num_guards: Number of guards to spawn.
+            num_farmers: Number of farmers to spawn.
+            num_merchants: Number of merchants to spawn.
             num_prey: Number of prey animals to spawn.
             num_predators: Number of predators (wolves) to spawn.
             torus: Whether the grid wraps around its edges.
@@ -97,9 +104,20 @@ class GameModel(mesa.Model):
         self.pasture: Pasture = Pasture.generate(
             width, height, self.is_walkable, self.random
         )
+        # Shared village food store, stocked by farmers and eaten by all.
+        _mouths = num_villagers + num_guards + num_farmers + num_merchants
+        self.granary_capacity: float = float(max(1, _mouths) * 3)
+        self.granary: float = self.granary_capacity * 0.5
+
+        # Completed merchant trades, tallied off the event bus.
+        self.trades: int = 0
+        self.events.subscribe(EventType.TRADE_COMPLETED, self._on_trade)
 
         self._spawn(Villager, num_villagers)
         self._spawn(Guard, num_guards)
+        self._spawn(Farmer, num_farmers)
+        # Merchants start clustered at the market square (map centre).
+        self._spawn(Merchant, num_merchants, near=(width // 2, height // 2), radius=6)
         self._spawn(Deer, num_prey)
         self._spawn(Wolf, num_predators)
 
@@ -108,8 +126,14 @@ class GameModel(mesa.Model):
 
         _logger.info("Simulation initialized.")
         _logger.info("Grid: %d x %d", width, height)
-        _logger.info("Villagers: %d  Guards: %d", num_villagers, num_guards)
+        _logger.info(
+            "Villagers: %d  Guards: %d  Farmers: %d  Merchants: %d",
+            num_villagers, num_guards, num_farmers, num_merchants,
+        )
         _logger.info("Prey: %d  Predators: %d", num_prey, num_predators)
+
+    def _on_trade(self, event: object) -> None:
+        self.trades += 1
 
     def is_walkable(self, x: int, y: int) -> bool:
         """Return whether an agent may occupy a cell.
@@ -123,15 +147,30 @@ class GameModel(mesa.Model):
         """
         return self.terrain.is_passable(x, y) and not self.scenery.blocks(x, y)
 
-    def _spawn(self, agent_class: type[BaseAgent], count: int) -> None:
+    def _spawn(
+        self,
+        agent_class: type[BaseAgent],
+        count: int,
+        *,
+        near: tuple[int, int] | None = None,
+        radius: int | None = None,
+    ) -> None:
         if count <= 0:
             return
-        open_cells = [
-            (x, y)
-            for y in range(self.height)
-            for x in range(self.width)
-            if self.is_walkable(x, y)
-        ]
+        if near is not None and radius is not None:
+            cx, cy = near
+            xs = range(max(0, cx - radius), min(self.width, cx + radius + 1))
+            ys = range(max(0, cy - radius), min(self.height, cy + radius + 1))
+        else:
+            xs, ys = range(self.width), range(self.height)
+        open_cells = [(x, y) for y in ys for x in xs if self.is_walkable(x, y)]
+        if not open_cells:  # A tight cluster region may be fully blocked.
+            open_cells = [
+                (x, y)
+                for y in range(self.height)
+                for x in range(self.width)
+                if self.is_walkable(x, y)
+            ]
         for _ in range(count):
             agent = agent_class(self)
             self.map.place_agent(agent, self.random.choice(open_cells))

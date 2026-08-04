@@ -68,6 +68,8 @@ def bootstrap(*, headless: bool = False) -> Application:
         settings.grid_height,
         num_villagers=settings.initial_villagers,
         num_guards=settings.initial_guards,
+        num_farmers=settings.initial_farmers,
+        num_merchants=settings.initial_merchants,
         num_prey=settings.initial_prey,
         num_predators=settings.initial_predators,
         torus=settings.grid_torus,

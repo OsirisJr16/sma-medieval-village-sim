@@ -43,8 +43,14 @@ class Inventory:
         Returns:
             The number of units actually added (may be less if capacity binds).
         """
-        # TODO: Increment quantity, clamped to remaining capacity.
-        raise NotImplementedError("Inventory.add is not implemented yet.")
+        if quantity <= 0:
+            return 0
+        if self.capacity is not None:
+            quantity = min(quantity, self.capacity - self.total())
+        if quantity <= 0:
+            return 0
+        self.items[resource] = self.items.get(resource, 0) + quantity
+        return quantity
 
     def remove(self, resource: ResourceType, quantity: int) -> int:
         """Remove units of a resource.
@@ -56,8 +62,10 @@ class Inventory:
         Returns:
             The number of units actually removed (bounded by what is held).
         """
-        # TODO: Decrement quantity, bounded by the held amount.
-        raise NotImplementedError("Inventory.remove is not implemented yet.")
+        removed = min(max(0, quantity), self.items.get(resource, 0))
+        if removed:
+            self.items[resource] -= removed
+        return removed
 
     def quantity_of(self, resource: ResourceType) -> int:
         """Return how many units of a resource are held.
@@ -68,5 +76,8 @@ class Inventory:
         Returns:
             The held quantity (``0`` if none).
         """
-        # TODO: Return items.get(resource, 0).
-        raise NotImplementedError("Inventory.quantity_of is not implemented yet.")
+        return self.items.get(resource, 0)
+
+    def total(self) -> int:
+        """Return the total number of units held across all resources."""
+        return sum(self.items.values())

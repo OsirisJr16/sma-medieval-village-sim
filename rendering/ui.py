@@ -19,6 +19,7 @@ from agents.needs import Need
 from agents.perception import nearest_of_type
 from config.colors import GUARD_COLOR, RGB, UI_ACCENT, UI_FOREGROUND
 from config.constants import AgentType
+from economy.resources import ResourceType
 
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
@@ -29,21 +30,37 @@ if TYPE_CHECKING:
 # Per-species display color (distinct and legible on the dark panel).
 _VILLAGER: RGB = (226, 190, 120)
 _GUARD: RGB = (120, 150, 230)
+_FARMER: RGB = (168, 200, 96)
 _DEER: RGB = (120, 196, 116)
 _WOLF: RGB = (216, 96, 96)
 
-# Sections: (label, agent type, color), drawn top to bottom.
+# Sections: (label, agent type, color), drawn top to bottom. Guards and farmers
+# are villager roles, folded into the Villagers section — their work shows up as
+# the "defending" / "farming" states rather than as separate populations.
 _SECTIONS: tuple[tuple[str, AgentType, RGB], ...] = (
     ("Villagers", AgentType.VILLAGER, _VILLAGER),
-    ("Guards", AgentType.GUARD, _GUARD),
     ("Deer", AgentType.DEER, _DEER),
     ("Wolves", AgentType.WOLF, _WOLF),
 )
-_COLOR_OF: dict[AgentType, RGB] = {kind: color for _, kind, color in _SECTIONS}
+# Fold these agent types into another for tallying.
+_MERGE: dict[AgentType, AgentType] = {
+    AgentType.GUARD: AgentType.VILLAGER,
+    AgentType.FARMER: AgentType.VILLAGER,
+}
+# Inspector header color per agent type (roles keep their own color).
+_COLOR_OF: dict[AgentType, RGB] = {
+    AgentType.VILLAGER: _VILLAGER,
+    AgentType.GUARD: _GUARD,
+    AgentType.FARMER: _FARMER,
+    AgentType.DEER: _DEER,
+    AgentType.WOLF: _WOLF,
+}
 
 # Semantic color per activity, shared across species.
 _STATE_COLORS: dict[str, RGB] = {
     "working": (120, 172, 96),
+    "farming": (168, 200, 96),
+    "trading": (216, 178, 92),
     "wandering": (150, 178, 112),
     "prowling": (150, 150, 162),
     "eating": (224, 182, 74),
@@ -143,7 +160,7 @@ class UI:
 
         if selected is not None:
             self._draw_inspector(surface, ix, iw, y, selected, model)
-        self._draw_footer(surface, ix, iw, surface.get_height(), paused, sim_fps)
+        self._draw_footer(surface, ix, iw, surface.get_height(), paused, sim_fps, model)
 
     # --- Header ---------------------------------------------------------------
 
@@ -176,6 +193,13 @@ class UI:
         grass = round(w * model.pasture.average())
         if grass > 0:
             pygame.draw.rect(surface, (110, 168, 92), (x, y, grass, bar_h), border_radius=3)
+        y += bar_h + 4
+
+        # Granary: the village food store farmers stock and everyone eats from.
+        pygame.draw.rect(surface, _GRAPH_BG, (x, y, w, bar_h), border_radius=3)
+        fill = round(w * min(1.0, model.granary / max(1.0, model.granary_capacity)))
+        if fill > 0:
+            pygame.draw.rect(surface, (214, 176, 90), (x, y, fill, bar_h), border_radius=3)
         return y + bar_h
 
     # --- Population history graph ---------------------------------------------
@@ -308,6 +332,14 @@ class UI:
         if Need.ENERGY in needs:
             y = self._need_bar(surface, x, w, y, "energy", needs[Need.ENERGY], _ENERGY_BAR)
 
+        inventory = getattr(agent, "inventory", None)
+        if inventory is not None:
+            wheat = inventory.quantity_of(ResourceType.WHEAT)
+            gold = inventory.quantity_of(ResourceType.GOLD)
+            line = f"wheat {wheat}   gold {gold}"
+            surface.blit(self._body_font.render(line, True, UI_ACCENT), (x, y))
+            y += self._body_font.get_height() + 2
+
         if agent.position is not None:
             pos = f"pos: ({agent.position[0]}, {agent.position[1]})"
             surface.blit(self._body_font.render(pos, True, _MUTED), (x, y))
@@ -350,7 +382,14 @@ class UI:
     # --- Footer ---------------------------------------------------------------
 
     def _draw_footer(
-        self, surface: Surface, x: int, w: int, bottom: int, paused: bool, sim_fps: int
+        self,
+        surface: Surface,
+        x: int,
+        w: int,
+        bottom: int,
+        paused: bool,
+        sim_fps: int,
+        model: GameModel,
     ) -> None:
         y = bottom - 54
         if paused:
@@ -358,6 +397,8 @@ class UI:
         else:
             status = self._body_font.render(f"{sim_fps} steps/s", True, _MUTED)
         surface.blit(status, (x, y))
+        trades = self._body_font.render(f"{model.trades} trades", True, UI_ACCENT)
+        surface.blit(trades, (x + w - trades.get_width(), y))
         y += status.get_height() + 6
         for line in ("space pause · +/- speed · F food", "L scale · click to inspect"):
             surface.blit(self._small_font.render(line, True, (120, 126, 140)), (x, y))
@@ -372,6 +413,7 @@ class UI:
             kind = getattr(agent, "agent_type", None)
             if kind is None:
                 continue
+            kind = _MERGE.get(kind, kind)
             brain = getattr(agent, "brain", None)
             state = brain.current.name if brain and brain.current else "-"
             breakdown.setdefault(kind, Counter())[state] += 1

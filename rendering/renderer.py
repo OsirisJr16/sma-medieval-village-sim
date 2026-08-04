@@ -56,6 +56,14 @@ _STATE_BADGES: dict[str, tuple[str, tuple[int, int, int]]] = {
     "sleeping": ("Z", WATER_BLUE),
     "alarmed": ("!", (235, 110, 90)),
     "defending": ("D", (150, 175, 240)),
+    "farming": ("F", (176, 208, 104)),
+    "trading": ("$", (224, 190, 96)),
+}
+# Ring colors marking villager roles on the map.
+_ROLE_RINGS: dict[AgentType, tuple[int, int, int]] = {
+    AgentType.GUARD: GUARD_COLOR,
+    AgentType.FARMER: (150, 200, 96),
+    AgentType.MERCHANT: (224, 190, 96),
 }
 
 
@@ -357,6 +365,7 @@ class Renderer:
     def _draw_world(self, model: GameModel) -> None:
         cell = self.cell_size
         ground = self.sprites.ground_tile(cell)
+        field = self.sprites.field_tile(cell)
         scenery = self.sprites.scenery_sprites(cell)
         dirt = self._food_tile(cell) if self.show_food else None
         pasture = model.pasture
@@ -368,8 +377,11 @@ class Renderer:
                 ox, oy = self.camera.world_to_screen((x * cell, y * cell))
                 if ground is not None:
                     self._surface.blit(ground, (int(ox), int(oy)))
-                # Tint grazed-down grass toward bare earth so depletion shows.
-                if dirt is not None and pasture.is_fertile((x, y)):
+                if pasture.is_tilled((x, y)):
+                    # A farmer's plowed plot reads as an actual field.
+                    self._surface.blit(field, (int(ox), int(oy)))
+                elif dirt is not None and pasture.is_fertile((x, y)):
+                    # Tint grazed-down grass toward bare earth so depletion shows.
                     alpha = int((1.0 - pasture.level((x, y))) * _FOOD_MAX_ALPHA)
                     if alpha > 8:
                         dirt.set_alpha(alpha)
@@ -444,11 +456,12 @@ class Renderer:
             roster = prey if kind is AgentType.DEER else villagers
             image = roster[agent.unique_id % len(roster)] if roster else fallback
             self._blit_standing(image, ox, oy, cell)
-            if kind is AgentType.GUARD:
+            ring = _ROLE_RINGS.get(kind)
+            if ring is not None:
                 import pygame
 
                 centre = (int(ox + cell / 2), int(oy + cell / 2))
-                pygame.draw.circle(self._surface, GUARD_COLOR, centre, int(cell * 0.5), 2)
+                pygame.draw.circle(self._surface, ring, centre, int(cell * 0.5), 2)
             if kind is not AgentType.DEER and cell >= _BADGE_MIN_CELL:
                 self._draw_state_badge(agent, ox, oy, cell)
 

@@ -56,6 +56,9 @@ class Villager(BaseAgent):
     #: FSM state to enter on a threat alert; guards override this to fight.
     THREAT_STATE: str = AlarmedState.name
 
+    #: Daytime labor state; farmers override this to harvest instead of roam.
+    WORK_STATE: str = WorkingState.name
+
     def __init__(self, model: mesa.Model) -> None:
         """Initialize the villager.
 
