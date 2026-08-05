@@ -86,8 +86,14 @@ _GRAPH_BG: RGB = (18, 20, 27)
 _HUNGER_BAR: RGB = (214, 96, 86)
 _ENERGY_BAR: RGB = (120, 186, 110)
 _HP_BAR: RGB = (206, 172, 84)
-# Reference max hit points per combatant, for the inspector's HP bar.
-_HP_MAX: dict[AgentType, float] = {AgentType.GUARD: 120.0, AgentType.WOLF: 100.0}
+# Reference max hit points per agent kind, for the inspector's HP bar.
+_HP_MAX: dict[AgentType, float] = {
+    AgentType.VILLAGER: 45.0,
+    AgentType.FARMER: 45.0,
+    AgentType.MERCHANT: 45.0,
+    AgentType.GUARD: 120.0,
+    AgentType.WOLF: 100.0,
+}
 _HISTORY_LEN = 200
 
 
@@ -145,22 +151,31 @@ class UI:
         self._ensure_fonts()
         pygame.draw.rect(surface, _PANEL_BG, (x, 0, self.width, surface.get_height()))
 
-        breakdown = self._tally(model)
+        breakdown, roles, gold = self._collect(model)
         self._sample_history(model, breakdown)
+        villager_states = breakdown.get(AgentType.VILLAGER, Counter())
+        under_attack = villager_states["defending"] + villager_states["alarmed"] > 0
 
         pad = 16
         ix = x + pad
         iw = self.width - pad * 2
         y = pad
-        y = self._draw_header(surface, model, ix, iw, y) + 12
-        y = self._draw_graph(surface, ix, iw, y) + 14
+        y = self._draw_header(surface, model, ix, iw, y) + 8
+        if under_attack:
+            y = self._draw_alert(surface, ix, iw, y) + 8
+        y = self._draw_graph(surface, ix, iw, y) + 4
+        y = self._draw_vitals(surface, model, ix, iw, y) + 12
+
         for label, kind, color in _SECTIONS:
             states = breakdown.get(kind, Counter())
-            y = self._draw_card(surface, ix, iw, y, label, color, states) + 10
+            y = self._draw_card(surface, ix, iw, y, label, color, states)
+            if kind is AgentType.VILLAGER:
+                y = self._draw_roles(surface, ix, iw, y + 2, roles)
+            y += 10
 
         if selected is not None:
             self._draw_inspector(surface, ix, iw, y, selected, model)
-        self._draw_footer(surface, ix, iw, surface.get_height(), paused, sim_fps, model)
+        self._draw_footer(surface, ix, iw, surface.get_height(), paused, sim_fps, model, gold)
 
     # --- Header ---------------------------------------------------------------
 
@@ -390,6 +405,7 @@ class UI:
         paused: bool,
         sim_fps: int,
         model: GameModel,
+        gold: int,
     ) -> None:
         y = bottom - 54
         if paused:
@@ -397,27 +413,73 @@ class UI:
         else:
             status = self._body_font.render(f"{sim_fps} steps/s", True, _MUTED)
         surface.blit(status, (x, y))
-        trades = self._body_font.render(f"{model.trades} trades", True, UI_ACCENT)
-        surface.blit(trades, (x + w - trades.get_width(), y))
+        economy = self._body_font.render(f"{gold}g · {model.trades} trades", True, UI_ACCENT)
+        surface.blit(economy, (x + w - economy.get_width(), y))
         y += status.get_height() + 6
         for line in ("space pause · +/- speed · F food", "L scale · click to inspect"):
             surface.blit(self._small_font.render(line, True, (120, 126, 140)), (x, y))
             y += self._small_font.get_height() + 1
 
+    # --- Extra dashboard rows -------------------------------------------------
+
+    def _draw_alert(self, surface: Surface, x: int, w: int, y: int) -> int:
+        import pygame
+
+        h = self._body_font.get_height() + 6
+        pygame.draw.rect(surface, (120, 40, 40), (x, y, w, h), border_radius=4)
+        text = self._body_font.render("!  VILLAGE UNDER ATTACK", True, (250, 220, 210))
+        surface.blit(text, (x + (w - text.get_width()) // 2, y + 3))
+        return y + h
+
+    def _draw_vitals(
+        self, surface: Surface, model: GameModel, x: int, w: int, y: int
+    ) -> int:
+        died = sum(model.deaths.values())
+        starved = model.deaths.get("starved", 0)
+        left = self._body_font.render(f"+{model.births} born", True, (140, 190, 130))
+        surface.blit(left, (x, y))
+        right = self._body_font.render(
+            f"-{died} died ({starved} starved)", True, (206, 130, 120)
+        )
+        surface.blit(right, (x + w - right.get_width(), y))
+        return y + left.get_height()
+
+    def _draw_roles(
+        self, surface: Surface, x: int, w: int, y: int, roles: Counter[AgentType]
+    ) -> int:
+        parts = (
+            f"folk {roles.get(AgentType.VILLAGER, 0)}",
+            f"guard {roles.get(AgentType.GUARD, 0)}",
+            f"farm {roles.get(AgentType.FARMER, 0)}",
+            f"trade {roles.get(AgentType.MERCHANT, 0)}",
+        )
+        text = self._small_font.render("  ·  ".join(parts), True, (150, 156, 172))
+        surface.blit(text, (x + 4, y))
+        return y + text.get_height()
+
     # --- Data -----------------------------------------------------------------
 
     @staticmethod
-    def _tally(model: GameModel) -> dict[AgentType, Counter[str]]:
+    def _collect(
+        model: GameModel,
+    ) -> tuple[dict[AgentType, Counter[str]], Counter[AgentType], int]:
+        """One pass over the agents: state breakdown, role counts, total gold."""
         breakdown: dict[AgentType, Counter[str]] = {}
+        roles: Counter[AgentType] = Counter()
+        gold = 0
         for agent in model.agents:
             kind = getattr(agent, "agent_type", None)
             if kind is None:
                 continue
-            kind = _MERGE.get(kind, kind)
+            roles[kind] += 1
+            merged = _MERGE.get(kind, kind)
             brain = getattr(agent, "brain", None)
             state = brain.current.name if brain and brain.current else "-"
-            breakdown.setdefault(kind, Counter())[state] += 1
-        return breakdown
+            breakdown.setdefault(merged, Counter())[state] += 1
+            inventory = getattr(agent, "inventory", None)
+            if inventory is not None:
+                gold += inventory.quantity_of(ResourceType.GOLD)
+        return breakdown, roles, gold
 
     def _ensure_fonts(self) -> None:
         if self._title_font is not None:

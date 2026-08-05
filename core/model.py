@@ -12,6 +12,7 @@ schedulers.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 import mesa
@@ -23,7 +24,7 @@ from agents.merchant import Merchant
 from agents.villager import Villager
 from agents.wolf import Wolf
 from ai.pathfinding.astar import AStarPathfinder
-from communication.events import EventType
+from communication.events import Event, EventType
 from core.logger import get_logger
 from communication.event_bus import EventBus
 from world.clock import WorldClock
@@ -111,9 +112,13 @@ class GameModel(mesa.Model):
         self.granary_capacity: float = float(max(1, _mouths) * 3)
         self.granary: float = self.granary_capacity * 0.5
 
-        # Completed merchant trades, tallied off the event bus.
+        # Vital statistics, tallied off the event bus.
         self.trades: int = 0
+        self.births: int = 0
+        self.deaths: Counter[str] = Counter()
         self.events.subscribe(EventType.TRADE_COMPLETED, self._on_trade)
+        self.events.subscribe(EventType.AGENT_SPAWNED, self._on_birth)
+        self.events.subscribe(EventType.AGENT_DIED, self._on_death)
 
         self._spawn(Villager, num_villagers)
         self._spawn(Guard, num_guards)
@@ -136,6 +141,12 @@ class GameModel(mesa.Model):
 
     def _on_trade(self, event: object) -> None:
         self.trades += 1
+
+    def _on_birth(self, event: object) -> None:
+        self.births += 1
+
+    def _on_death(self, event: Event) -> None:
+        self.deaths[event.payload.get("cause", "natural")] += 1
 
     def is_walkable(self, x: int, y: int) -> bool:
         """Return whether an agent may occupy a cell.

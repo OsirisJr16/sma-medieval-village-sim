@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 import mesa
 
+from communication.events import Event, EventType
+
 if TYPE_CHECKING:
     from ai.fsm.state_machine import StateMachine
     from communication.mailbox import Mailbox
@@ -90,12 +92,24 @@ class BaseAgent(mesa.Agent, ABC):
         near = self.model.map.agents_near(self.position, self.vision)
         return [agent for agent in near if agent is not self and agent.alive]
 
-    def die(self) -> None:
-        """Remove this agent from the world (grid and scheduler)."""
+    def die(self, cause: str = "natural") -> None:
+        """Remove this agent from the world (grid and scheduler).
+
+        Args:
+            cause: Why the agent died (for statistics), e.g. ``"starved"`` or
+                ``"hunted"``.
+        """
         if not self.alive:
             return
         self.alive = False
         self.on_remove()
+        self.model.events.publish(
+            Event(
+                EventType.AGENT_DIED,
+                source=self.unique_id,
+                payload={"cause": cause, "kind": getattr(self, "agent_type", None)},
+            )
+        )
         if self.pos is not None:
             self.model.map.grid.remove_agent(self)
         self.position = None

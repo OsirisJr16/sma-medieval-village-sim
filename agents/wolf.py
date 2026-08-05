@@ -67,7 +67,7 @@ class Wolf(BaseAgent):
 
         self.needs[Need.HUNGER] = clamp(self.needs[Need.HUNGER] + _HUNGER_PER_TICK)
         if self.needs[Need.HUNGER] >= 1.0:
-            self.die()
+            self.die(cause="starved")
             return
         # An adjacent guard is fought before anything else (self-defense).
         guard = nearest_of_type(self, AgentType.GUARD)
@@ -86,15 +86,24 @@ class Wolf(BaseAgent):
         """
         target.hp -= _DAMAGE
         if target.hp <= 0:
-            target.die()
+            target.die(cause="hunted")
 
     def eat(self, prey: BaseAgent) -> None:
-        """Kill a prey animal and sate hunger.
+        """Bite prey; wildlife dies at once, a villager takes several wounds.
+
+        The wolf is fed (and may whelp) only once the prey is actually killed —
+        so villagers can be rescued by a guard before the fatal bite.
 
         Args:
-            prey: The prey to consume.
+            prey: The prey being attacked.
         """
-        prey.die()
+        hp = getattr(prey, "hp", None)
+        if hp is not None:
+            prey.hp -= _DAMAGE
+            if prey.hp > 0:
+                return  # wounded, not yet killed — no meal
+        prey.die(cause="hunted")
+
         self.needs[Need.HUNGER] = clamp(self.needs[Need.HUNGER] - _MEAL)
         # A well-fed wolf in a sparse territory may whelp after a hunt.
         if self.needs[Need.HUNGER] <= _BREED_HUNGER:
