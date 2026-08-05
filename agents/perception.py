@@ -43,6 +43,33 @@ def nearest_of_type(agent: BaseAgent, kind: AgentType) -> BaseAgent | None:
     return best
 
 
+def nearest_of_types(
+    agent: BaseAgent, kinds: frozenset[AgentType]
+) -> BaseAgent | None:
+    """Return the closest perceived agent whose type is in ``kinds``.
+
+    Args:
+        agent: The perceiving agent.
+        kinds: The set of agent types to look for.
+
+    Returns:
+        The nearest matching agent within vision, or ``None``.
+    """
+    origin = agent.position
+    if origin is None:
+        return None
+
+    best: BaseAgent | None = None
+    best_distance: int | None = None
+    for other in agent.perceive():
+        if getattr(other, "agent_type", None) not in kinds or other.position is None:
+            continue
+        distance = _squared_distance(origin, other.position)
+        if best_distance is None or distance < best_distance:
+            best, best_distance = other, distance
+    return best
+
+
 def count_of_type(agent: BaseAgent, kind: AgentType) -> int:
     """Count perceived agents of a given kind (local crowding).
 

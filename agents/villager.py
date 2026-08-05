@@ -39,6 +39,13 @@ _VISION: Final[int] = 3
 _ALARM_RADIUS: Final[int] = 9
 #: ...and stays wary of it for this many ticks after the last sighting.
 _ALARM_MEMORY: Final[int] = 5
+#: Survival: hunger at which a villager starves, and the wounds it costs.
+_STARVE_HUNGER: Final[float] = 0.97
+_STARVE_DAMAGE: Final[float] = 4.0
+#: Hit points recovered per safe, fed tick; no healing while hungry or fighting.
+_HP_REGEN: Final[float] = 1.0
+_REGEN_MAX_HUNGER: Final[float] = 0.7
+_NO_REGEN_STATES: frozenset[str] = frozenset({"defending", "alarmed"})
 
 
 class Villager(BaseAgent):
@@ -59,6 +66,9 @@ class Villager(BaseAgent):
     #: Daytime labor state; farmers override this to harvest instead of roam.
     WORK_STATE: str = WorkingState.name
 
+    #: Maximum hit points; guards override this to be sturdier fighters.
+    MAX_HP: float = 45.0
+
     def __init__(self, model: mesa.Model) -> None:
         """Initialize the villager.
 
@@ -67,6 +77,7 @@ class Villager(BaseAgent):
         """
         super().__init__(model)
         self.vision = _VISION
+        self.hp: float = self.MAX_HP
 
         # Staggered starting needs so the population does not eat and sleep in
         # lockstep.
@@ -97,7 +108,22 @@ class Villager(BaseAgent):
         self._metabolize()
         if self.brain is not None:
             self.brain.update()
-        self._maybe_breed()
+        self._survive()
+        if self.alive:
+            self._maybe_breed()
+
+    def _survive(self) -> None:
+        """Starve when famished, heal when safe and fed, die at zero HP."""
+        if self.needs[Need.HUNGER] >= _STARVE_HUNGER:
+            self.hp -= _STARVE_DAMAGE
+        elif self.hp < self.MAX_HP and self._can_heal():
+            self.hp = min(self.MAX_HP, self.hp + _HP_REGEN)
+        if self.hp <= 0:
+            self.die(cause="starved")
+
+    def _can_heal(self) -> bool:
+        state = self.brain.current.name if self.brain and self.brain.current else ""
+        return state not in _NO_REGEN_STATES and self.needs[Need.HUNGER] < _REGEN_MAX_HUNGER
 
     def alarm_position(self) -> Coord | None:
         """Return the position of an active danger, or ``None`` once it lapses."""

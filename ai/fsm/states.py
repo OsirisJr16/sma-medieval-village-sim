@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Final
 
 from agents.movement import step_away, step_toward, wander
 from agents.needs import Need
-from agents.perception import is_adjacent, nearest_of_type
+from agents.perception import is_adjacent, nearest_of_type, nearest_of_types
 from ai.behaviors.eat import EatBehavior
 from ai.behaviors.farm import FarmBehavior
 from ai.behaviors.graze import GrazeBehavior
@@ -65,6 +65,21 @@ _PREY_FED: Final[float] = 0.10
 
 #: Cells a hunting predator covers per tick — its speed edge over fleeing prey.
 _HUNT_STEPS: Final[int] = 2
+
+#: Normal prey is wildlife; a wolf only raids the village (defenceless humans)
+#: once it is hungry enough to be desperate.
+_WOLF_PREY_WILD: Final[frozenset[AgentType]] = frozenset({AgentType.DEER})
+_WOLF_PREY_DESPERATE: Final[frozenset[AgentType]] = frozenset(
+    {AgentType.DEER, AgentType.VILLAGER, AgentType.FARMER, AgentType.MERCHANT}
+)
+_WOLF_DESPERATE_HUNGER: Final[float] = 0.55
+
+
+def _wolf_prey(agent: BaseAgent) -> frozenset[AgentType]:
+    """Prey a wolf will consider — humans only when it is starving."""
+    if agent.needs.get(Need.HUNGER, 0.0) >= _WOLF_DESPERATE_HUNGER:
+        return _WOLF_PREY_DESPERATE
+    return _WOLF_PREY_WILD
 
 
 class WorkingState(State):
@@ -395,7 +410,7 @@ class ProwlingState(State):
         Returns:
             The next state's name, or ``None`` to keep prowling.
         """
-        if nearest_of_type(agent, AgentType.DEER) is not None:
+        if nearest_of_types(agent, _wolf_prey(agent)) is not None:
             return HuntingState.name
         return None
 
@@ -411,7 +426,7 @@ class HuntingState(State):
         Args:
             agent: The hunting predator.
         """
-        prey = nearest_of_type(agent, AgentType.DEER)
+        prey = nearest_of_types(agent, _wolf_prey(agent))
         if prey is None:
             return
         # A short burst lets the predator close on same-speed fleeing prey.
@@ -433,6 +448,6 @@ class HuntingState(State):
         Returns:
             The next state's name, or ``None`` to keep hunting.
         """
-        if nearest_of_type(agent, AgentType.DEER) is None:
+        if nearest_of_types(agent, _wolf_prey(agent)) is None:
             return ProwlingState.name
         return None

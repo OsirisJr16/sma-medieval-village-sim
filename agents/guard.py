@@ -25,10 +25,7 @@ if TYPE_CHECKING:
 
     from agents.base_agent import BaseAgent
 
-_MAX_HP: Final[float] = 120.0
 _DAMAGE: Final[float] = 30.0
-#: Hit points regained per peaceful tick.
-_REGEN: Final[float] = 1.5
 #: Guards see farther than ordinary villagers, to close on threats.
 _VISION: Final[int] = 5
 
@@ -42,6 +39,8 @@ class Guard(Villager):
 
     agent_type: AgentType = AgentType.GUARD
     THREAT_STATE: str = DefendingState.name
+    #: Guards are far sturdier than ordinary villagers.
+    MAX_HP: float = 120.0
 
     def __init__(self, model: mesa.Model) -> None:
         """Initialize the guard.
@@ -51,19 +50,6 @@ class Guard(Villager):
         """
         super().__init__(model)
         self.vision = _VISION
-        self.hp: float = _MAX_HP
-
-    def step(self) -> None:
-        """Advance the guard by one tick, healing when no longer in combat."""
-        super().step()
-        if (
-            self.alive
-            and self.brain is not None
-            and self.brain.current is not None
-            and self.brain.current.name != DefendingState.name
-            and self.hp < _MAX_HP
-        ):
-            self.hp = min(_MAX_HP, self.hp + _REGEN)
 
     def attack(self, target: BaseAgent) -> None:
         """Strike a target, killing it if its hit points reach zero.
@@ -73,7 +59,7 @@ class Guard(Villager):
         """
         target.hp -= _DAMAGE
         if target.hp <= 0:
-            target.die()
+            target.die(cause="slain")
 
     def _build_brain(self) -> StateMachine:
         """Assemble the guard's state machine (defends instead of fleeing)."""

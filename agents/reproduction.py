@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from communication.events import Event, EventType
+
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
 
@@ -49,4 +51,8 @@ def try_reproduce(agent: BaseAgent, *, chance: float, cap: int) -> BaseAgent | N
 
     child = type(agent)(model)
     model.map.place_agent(child, cell)
+    model.events.publish(
+        Event(EventType.AGENT_SPAWNED, source=agent.unique_id,
+              payload={"kind": getattr(child, "agent_type", None)})
+    )
     return child
